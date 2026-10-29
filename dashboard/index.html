@@ -1,0 +1,142 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Ultron Dashboard</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Press+Start+2P&family=JetBrains+Mono:wght@400;600&display=swap" />
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <header class="topbar">
+      <div class="brand">
+        <canvas id="logo" class="pixel" width="24" height="24" aria-hidden="true"></canvas>
+        <span class="brand-name">ULTRON</span>
+        <span class="brand-sub">orquestrador de modelos</span>
+      </div>
+      <div class="top-right">
+        <select id="session" aria-label="Sessão"></select>
+        <span id="live" class="pill pill-muted" title="Conexão com o dashboard">● offline</span>
+        <span id="alive" class="pill pill-muted" title="A sessão do Claude Code que roda esta jornada">sessão ?</span>
+      </div>
+    </header>
+
+    <main id="app">
+      <section id="empty" class="panel empty" hidden>
+        <canvas id="empty-sprite" class="pixel big" width="24" height="24" aria-hidden="true"></canvas>
+        <h2>Nenhuma jornada ainda</h2>
+        <p>Chame <code>/ultron &lt;tarefa&gt;</code> numa sessão do Claude Code para o Ultron montar o fluxo. Ele aparece aqui para você aprovar.</p>
+      </section>
+
+      <div id="content" hidden>
+        <section id="approval" class="banner" hidden>
+          <div class="banner-text">
+            <strong>O Ultron aguarda sua aprovação</strong>
+            <span id="approval-detail"></span>
+          </div>
+          <div class="banner-actions">
+            <button id="approve" class="btn btn-primary">Aprovar fluxo</button>
+            <button id="ask-changes" class="btn">Pedir mudanças</button>
+          </div>
+          <form id="reject-form" class="reject-form" hidden>
+            <textarea id="reject-reason" rows="2" placeholder="O que o Ultron deve mudar no plano?"></textarea>
+            <div class="row-end">
+              <button type="button" id="reject-cancel" class="btn btn-ghost">Voltar</button>
+              <button type="submit" class="btn btn-danger">Enviar pedido</button>
+            </div>
+          </form>
+        </section>
+
+        <section class="panel hero">
+          <div class="hero-main">
+            <div class="eyebrow">Objetivo</div>
+            <h1 id="goal"></h1>
+            <p id="rationale" class="muted"></p>
+            <div class="chips" id="chips"></div>
+          </div>
+          <div class="hero-side">
+            <div class="stat"><span class="stat-label">Status</span><span id="status" class="status-badge"></span></div>
+            <div class="stat"><span class="stat-label">Progresso</span><span id="progress" class="stat-value"></span></div>
+            <div class="stat"><span class="stat-label">Revisão</span><span id="revision" class="stat-value"></span></div>
+            <div class="hero-actions">
+              <button id="pause" class="btn">Pausar</button>
+              <button id="cancel" class="btn btn-danger-ghost">Cancelar</button>
+            </div>
+          </div>
+        </section>
+
+        <section class="panel">
+          <div class="section-head">
+            <h2>Jornada</h2>
+            <span id="journey-caption" class="muted"></span>
+          </div>
+          <div class="journey-scroll">
+            <div id="journey" class="journey">
+              <div class="road"></div>
+              <div id="road-lit" class="road road-lit"></div>
+              <div id="stations" class="stations"></div>
+              <div id="walker" class="walker"><canvas id="ultron" class="pixel" width="24" height="24"></canvas><span id="walker-say" class="say"></span></div>
+            </div>
+          </div>
+        </section>
+
+        <div class="grid">
+          <section class="panel">
+            <div class="section-head">
+              <h2>Fluxo de agentes</h2>
+              <span class="muted">Edite modelo, effort e etapas; cada mudança pede nova aprovação.</span>
+            </div>
+            <div class="table-wrap">
+              <table class="flow">
+                <thead>
+                  <tr>
+                    <th></th>
+                    <th>Etapa</th>
+                    <th>Papel</th>
+                    <th>Execução</th>
+                    <th>Modelo</th>
+                    <th>Effort</th>
+                    <th>Onda</th>
+                    <th>Depende de</th>
+                    <th>Status</th>
+                    <th></th>
+                  </tr>
+                </thead>
+                <tbody id="flow-body"></tbody>
+              </table>
+            </div>
+            <form id="add-form" class="add-form">
+              <input id="add-id" placeholder="id (ex.: docs)" pattern="[a-z0-9][a-z0-9-]{0,31}" required />
+              <input id="add-title" placeholder="Título da nova etapa" required />
+              <select id="add-role"></select>
+              <input id="add-wave" type="number" min="1" value="1" aria-label="Onda" />
+              <button class="btn" type="submit">+ Etapa</button>
+            </form>
+          </section>
+
+          <aside class="side">
+            <section class="panel">
+              <h2>Perfil</h2>
+              <div id="profiles" class="segmented" role="radiogroup" aria-label="Perfil"></div>
+              <p class="muted small">Economia desce um degrau de effort (e tira o Opus de quem não planeja); qualidade sobe. Etapas editadas à mão ficam como estão.</p>
+            </section>
+            <section class="panel">
+              <h2>Consumo</h2>
+              <div id="mix" class="mix"></div>
+              <div id="mix-legend" class="legend"></div>
+              <div id="tokens" class="muted small"></div>
+            </section>
+            <section class="panel">
+              <h2>Diário de bordo</h2>
+              <ol id="log" class="log"></ol>
+            </section>
+          </aside>
+        </div>
+      </div>
+    </main>
+
+    <div id="toast" class="toast" role="status" hidden></div>
+    <script type="module" src="/app.js"></script>
+  </body>
+</html>

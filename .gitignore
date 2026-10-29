@@ -1,0 +1,7 @@
+# Written by Claude Code when the mod loads
+.claude-plugin/types/
+.mcpb-cache/
+node_modules/
+*.log
+*.tmp
+.DS_Store

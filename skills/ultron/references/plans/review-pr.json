@@ -1,0 +1,15 @@
+{
+  "goal": "Revisar <owner/repo>#<N>: <título>",
+  "agent": "<owner/repo>",
+  "playbook": "review",
+  "profile": "equilibrado",
+  "complexity": 5,
+  "rationale": "Revisão de PR como QA sênior: contexto, auditoria e testes em paralelo, validação adversarial dos achados e comentário só publicado com o ok do usuário.",
+  "steps": [
+    { "id": "contexto", "title": "Carregar o agente do repo, ler PR e issue, preparar worktree", "role": "researcher", "wave": 1 },
+    { "id": "auditoria", "title": "Auditar corretude, segurança, código limpo e critérios de aceite", "role": "checker-critical", "wave": 2, "dependsOn": ["contexto"] },
+    { "id": "testes", "title": "Rodar testes, typecheck, lint, build e checar CI e cobertura", "role": "checker", "wave": 2, "dependsOn": ["contexto"] },
+    { "id": "validacoes", "title": "Validar cada achado de forma adversarial e reproduzir", "role": "checker", "wave": 3, "dependsOn": ["auditoria", "testes"] },
+    { "id": "comentario", "title": "Montar o comentário, publicar após ok e atualizar o agente do repo", "role": "writer", "wave": 4, "dependsOn": ["validacoes"], "mode": "inline" }
+  ]
+}

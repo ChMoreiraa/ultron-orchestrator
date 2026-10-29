@@ -1,0 +1,11 @@
+{
+  "name": "ultron",
+  "version": "0.1.0",
+  "description": "Orquestrador /ultron: escolhe modelo e effort por etapa, pede aprovação e mostra a jornada num painel lateral e num dashboard local",
+  "author": { "name": "VitorCapeleti", "url": "https://github.com/VitorCapeleti" },
+  "homepage": "https://github.com/VitorCapeleti/ultron-orchestrator",
+  "repository": "https://github.com/VitorCapeleti/ultron-orchestrator",
+  "license": "MIT",
+  "keywords": ["orchestration", "subagents", "model-routing", "effort", "dashboard", "code-review"],
+  "types": "./types/index.d.ts"
+}

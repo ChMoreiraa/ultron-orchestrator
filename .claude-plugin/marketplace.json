@@ -1,0 +1,11 @@
+{
+  "name": "ultron-orchestrator",
+  "owner": { "name": "VitorCapeleti" },
+  "plugins": [
+    {
+      "name": "ultron",
+      "source": "./",
+      "description": "Orquestrador /ultron: modelo e effort por etapa, aprovação, painel lateral e dashboard local"
+    }
+  ]
+}
