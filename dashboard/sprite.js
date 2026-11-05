@@ -10,38 +10,41 @@ export const PALETTE = {
   E: '#ff4d3d', // olho
   Y: '#ffe08a', // núcleo aceso
   G: '#4b5262', // olho apagado
+  V: '#2b0e16', // visor
 }
 
+// Capacete com crista, visor escuro com olhos em cunha e grade na boca.
 const HEAD = [
-  '......KKKK......',
-  '....KKSSSSKK....',
-  '...KSLLSSSSDK...',
+  '.......KK.......',
+  '......KRrK......',
+  '....KKSRrSKK....',
+  '...KSLLRrSSDK...',
   '..KSLSSSSSSSDK..',
-  '..KSEEYSSYEEDK..',
-  '..KSSSSSSSSSDK..',
-  '..KDSRRRRRRSDK..',
-  '...KDSSSSSSDK...',
+  '..KSVEEVVEEVDK..',
+  '..KSVVEVVEVVDK..',
+  '...KDSKDDKSDK...',
   '....KKDDDDKK....',
 ]
 
+// Ombreiras vermelhas e o núcleo aceso no peito.
 const TORSO = [
-  '..KKSSRRRRSSKK..',
-  '.KSSDSRYYRSDSSK.',
+  '.KRRKKSSSSKKRRK.',
+  '.KrSKDSYYSDKSrK.',
   '.KSKKDSRRSDKKSK.',
-  '.KDK.KDSSDK.KDK.',
+  '.KDK.KDrrDK.KDK.',
 ]
 
 const ARMS_UP = [
-  '.KK.KSRRRRSK.KK.',
-  '.KSKSDRYYRDSKSK.',
-  '..KKKDSRRSDKKK..',
-  '....KKDSSDKK....',
+  'KSK.KKSSSSKK.KSK',
+  'KRRKKDSYYSDKKRRK',
+  '.KKrKDSRRSDKrKK.',
+  '....KKDrrDKK....',
 ]
 
 const LEGS = {
-  stand: ['....KDSK.KSDK...', '....KDDK.KDDK...', '....KKKK.KKKK...'],
-  walkA: ['...KDSK..KSDK...', '..KDDK....KDDK..', '..KKKK....KKKK..'],
-  walkB: ['....KDSKKSDK....', '....KDDKKDDK....', '....KKKKKKKK....'],
+  stand: ['...KSDK..KSDK...', '...KDDK..KDDK...', '..KKKKK..KKKKK..'],
+  walkA: ['..KSDK....KSDK..', '..KDDK....KDDK..', '.KKKKK....KKKKK.'],
+  walkB: ['....KSDKKSDK....', '....KDDKKDDK....', '...KKKKKKKKKK...'],
 }
 
 const swapEyes = (rows, from, to) => rows.map(r => r.replaceAll(from, to))
@@ -52,7 +55,7 @@ export function frame(pose, t) {
   let head = HEAD
   if (pose === 'fail') head = swapEyes(swapEyes(HEAD, 'E', 'G'), 'Y', 'G')
   else if (pose === 'win') head = swapEyes(HEAD, 'E', 'Y')
-  else if (Math.floor(t / 2600) % 6 === 5 && t % 2600 < 160) head = swapEyes(swapEyes(HEAD, 'E', 'D'), 'Y', 'D') // pisca
+  else if (Math.floor(t / 2600) % 6 === 5 && t % 2600 < 160) head = swapEyes(HEAD, 'E', 'V') // pisca
   let torso = pose === 'win' && tick % 2 === 0 ? ARMS_UP : TORSO
   if (pose === 'work' && tick % 2 === 1) torso = swapEyes(torso, 'Y', 'L')
   const legs = pose === 'walk' ? (tick % 2 ? LEGS.walkA : LEGS.walkB) : LEGS.stand

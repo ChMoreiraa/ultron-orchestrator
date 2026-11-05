@@ -11,15 +11,17 @@ export const PALETTE: Record<string, string> = {
   E: '#ff4d3d',
   Y: '#ffe08a',
   G: '#4b5262',
+  V: '#2b0e16',
 }
 
-const HEAD = ['..KKKKKK..', '.KSLSSSDK.', '.KEYSSYEK.', '.KSSSSSDK.', '.KDRRRRDK.', '..KKDDKK..']
-const BODY = ['.KSSRRSSK.', 'KSDSYYSDSK']
-const ARMS_UP = ['KKSSRRSSKK', '..DSYYSD..']
+// Capacete com crista, visor escuro, grade na boca; ombreiras e núcleo no peito.
+const HEAD = ['...KRrK...', '..KSRrSK..', '.KLSSSSDK.', '.KEYVVYEK.', '.KDSDDSDK.', '..KKDDKK..']
+const BODY = ['KRRSYYSRRK', 'KSDKRRKDSK']
+const ARMS_UP = ['RRKSYYSKRR', '.SDKRRKDS.']
 const LEGS = {
-  stand: ['..KDSSDK..', '..KK..KK..'],
-  walkA: ['.KDS..SDK.', '.KK....KK.'],
-  walkB: ['...KSSK...', '...KKKK...'],
+  stand: ['..KSDDSK..', '.KKK..KKK.'],
+  walkA: ['.KSD..DSK.', 'KKK....KKK'],
+  walkB: ['...KSSK...', '..KKKKKK..'],
 }
 
 const swap = (rows: string[], from: string, to: string) => rows.map(r => r.split(from).join(to))
@@ -28,7 +30,7 @@ export function pixels(pose: Pose, frame: number): string[] {
   let head = HEAD
   if (pose === 'fail') head = swap(swap(HEAD, 'E', 'G'), 'Y', 'G')
   else if (pose === 'win') head = swap(HEAD, 'E', 'Y')
-  else if (frame % 9 === 8) head = swap(swap(HEAD, 'E', 'D'), 'Y', 'D')
+  else if (frame % 9 === 8) head = swap(swap(HEAD, 'E', 'V'), 'Y', 'V')
   if (pose === 'win' && frame % 2 === 0) head = [head[0]!, head[1]!, head[2]!, head[3]!, head[4]!, 'K.KKDDKK.K']
   let body = pose === 'win' && frame % 2 === 0 ? ARMS_UP : BODY
   if (pose === 'work' && frame % 2 === 1) body = swap(body, 'Y', 'L')
