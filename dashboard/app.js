@@ -454,10 +454,12 @@ function renderLog(run) {
   )
 }
 
-// ------------------------------------------------------------ agentes (torre T1)
+// ------------------------------------------------------------ torre: lista de agentes + perfil
 
-const AG = { tab: 'jornada', agentes: null, geradoEm: null, lastAt: 0, live: false, warn: '', source: null, poll: null }
+const AG = { agentes: null, geradoEm: null, lastAt: 0, live: false, warn: '', source: null, poll: null, sel: null }
 const ESTADO_PT = { aguardando: 'aguardando você', executando: 'executando', pausado: 'pausado', ocioso: 'ocioso', sem_sinal: 'sem sinal' }
+const AVATAR_RE = /^\/api\/torre\/avatar\/[A-Za-z0-9._-]+\.png$/
+const AV_CACHE = new Map()
 
 const initials = nome =>
   String(nome ?? '')
@@ -467,65 +469,169 @@ const initials = nome =>
     .map(w => Array.from(w)[0].toUpperCase())
     .join('') || '?'
 
-function agentCard(a) {
-  const estado = ESTADO_PT[a.estado] ? a.estado : 'ocioso'
-  const isUltron = a.tipo === 'ultron' && Boolean(a.sessao)
-  const fallback = () => el('span', { class: 'ag-avatar ag-initials', 'aria-hidden': 'true' }, initials(a.nome))
-  // Só o próprio servidor serve avatar: qualquer outro valor (URL externa, javascript:) vira as iniciais.
-  const hasAvatar = typeof a.avatar === 'string' && /^\/api\/torre\/avatar\/[A-Za-z0-9._-]+\.png$/.test(a.avatar)
-  const avatar = hasAvatar ? el('img', { class: 'ag-avatar', src: a.avatar, alt: '', loading: 'lazy', onerror: e => e.target.replaceWith(fallback()) }) : fallback()
-  const props = { class: `ag-card ag-${estado}${isUltron ? ' ag-click' : ''}`, 'data-id': a.id }
-  if (isUltron) {
-    props.role = 'button'
-    props.tabindex = '0'
-    props.title = 'Abrir a jornada desta sessão'
-    props.onclick = () => openJourney(a.sessao)
-    props.onkeydown = e => {
-      if (e.key === 'Enter' || e.key === ' ') {
-        e.preventDefault()
-        openJourney(a.sessao)
-      }
-    }
+/** Cor fixa por id: o mesmo agente tem sempre o mesmo círculo. */
+function hueOf(id) {
+  let h = 0
+  for (const c of String(id)) h = (h * 31 + c.codePointAt(0)) >>> 0
+  return h % 360
+}
+
+const estadoOf = a => (ESTADO_PT[a.estado] ? a.estado : 'ocioso')
+
+/** Foto (só a servida pela própria torre) ou iniciais num círculo colorido. */
+function avatarEl(a, size) {
+  const cls = `av av-${size}`
+  const fallback = () => el('span', { class: `${cls} av-initials`, style: `background:hsl(${hueOf(a.id)} 45% 36%)`, 'aria-hidden': 'true' }, initials(a.nome))
+  if (typeof a.avatar !== 'string' || !AVATAR_RE.test(a.avatar)) return fallback()
+  // A lista é refeita a cada mudança (o Higuruma avisa a cada 10 s) e o avatar sai com `no-store`: reaproveita o
+  // mesmo <img> para a foto não piscar nem ser baixada de novo a cada quadro.
+  const key = `${a.id}|${size}|${a.avatar}`
+  let node = AV_CACHE.get(key)
+  if (!node) {
+    node = el('img', {
+      class: cls,
+      src: a.avatar,
+      alt: '',
+      onerror: e => {
+        const f = fallback()
+        e.target.replaceWith(f)
+        AV_CACHE.set(key, f)
+      },
+    })
+    AV_CACHE.set(key, node)
   }
+  return node
+}
+
+/** HH:MM se for hoje, DD/MM antes. */
+function stamp(ms) {
+  if (typeof ms !== 'number' || !Number.isFinite(ms)) return ''
+  const d = new Date(ms)
+  const now = new Date()
+  if (d.toDateString() === now.toDateString()) return d.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })
+  return d.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' })
+}
+
+function ago(ms) {
+  if (typeof ms !== 'number' || !Number.isFinite(ms)) return 'sem registro'
+  const s = Math.max(0, Math.round((Date.now() - ms) / 1000))
+  if (s < 60) return `atualizado há ${s}s`
+  if (s < 3600) return `atualizado há ${Math.floor(s / 60)} min`
+  return `atualizado há ${Math.floor(s / 3600)} h`
+}
+
+const isHttp = u => typeof u === 'string' && /^https?:\/\//i.test(u)
+
+function agentRow(a) {
+  const estado = estadoOf(a)
+  const isUltron = a.tipo === 'ultron' && Boolean(a.sessao)
+  const open = AG.sel !== null ? AG.sel === a.id : isUltron && a.sessao === S.sid
+  const preview = a.fazendo || a.papel || ESTADO_PT[estado]
   return el(
-    'article',
-    props,
+    'button',
+    {
+      type: 'button',
+      class: `lr ag-${estado}${open ? ' open' : ''}`,
+      'data-id': a.id,
+      title: `${a.nome} · ${ESTADO_PT[estado]}`,
+      'aria-label': `${a.nome}, ${ESTADO_PT[estado]}`,
+      'aria-current': open ? 'true' : null,
+      onclick: () => openAgent(a),
+    },
+    el('span', { class: 'lr-pic' }, avatarEl(a, 'm'), el('i', { class: 'ag-dot', 'aria-hidden': 'true' })),
     el(
-      'div',
-      { class: 'ag-top' },
-      avatar,
-      el(
-        'div',
-        { class: 'ag-id' },
-        el('div', { class: 'ag-name' }, a.nome, a.tipo === 'sessao' && el('span', { class: 'ag-badge' }, 'sessão'), a.tipo === 'ultron' && el('span', { class: 'ag-badge ag-badge-ultron' }, 'Ultron')),
-        a.papel && el('div', { class: 'ag-role muted small' }, a.papel),
-        a.tipo === 'sessao' && a.pasta && el('div', { class: 'ag-dir mono muted small' }, a.pasta),
-      ),
-      el('span', { class: 'ag-state' }, el('i', { class: 'ag-dot', 'aria-hidden': 'true' }), ESTADO_PT[estado]),
+      'span',
+      { class: 'lr-body' },
+      el('span', { class: 'lr-top' }, el('span', { class: 'lr-name' }, a.nome), el('time', { class: 'lr-time' }, stamp(a.atualizadoEm))),
+      el('span', { class: 'lr-bottom' }, el('span', { class: 'lr-preview' }, preview), estado === 'aguardando' && el('span', { class: 'lr-badge' }, 'aguardando')),
     ),
-    a.fazendo && el('div', { class: 'ag-doing' }, a.fazendo),
-    a.erro && el('div', { class: 'ag-error', role: 'alert' }, '⚠ ', a.erro),
-    a.fila > 0 && el('div', { class: 'ag-queue muted small' }, `fila: ${a.fila}`),
   )
 }
 
 function renderAgentes() {
   const list = AG.agentes
   $('agentes-empty').hidden = !(list && list.length === 0)
-  $('agentes-grid').hidden = !list?.length
-  $('agentes-grid').replaceChildren(...(list ?? []).map(agentCard))
+  const keep = document.activeElement?.closest?.('.lr')?.dataset.id
+  $('agentes-list').replaceChildren(...(list ?? []).map(agentRow))
+  if (keep) [...$('agentes-list').children].find(n => n.dataset.id === keep)?.focus({ preventScroll: true })
   const live = $('agentes-live')
   live.textContent = AG.live ? '● ao vivo' : '● offline'
   live.className = `pill ${AG.live ? 'pill-ok' : 'pill-muted'}`
   const warn = $('agentes-warn')
   warn.hidden = !AG.warn
   warn.textContent = AG.warn
-  renderAge()
+  renderPerfil()
+}
+
+function field(label, value) {
+  return el('div', { class: 'pf-field' }, el('span', { class: 'pf-label' }, label), el('span', { class: 'pf-value' }, value))
+}
+
+function renderPerfil() {
+  const box = $('perfil')
+  if (AG.sel === null) return
+  const a = AG.agentes?.find(x => x.id === AG.sel)
+  if (!AG.agentes) return box.replaceChildren(el('p', { class: 'muted' }, 'Carregando…'))
+  if (!a) {
+    return box.replaceChildren(
+      el('h2', {}, 'Agente'),
+      el('p', { class: 'pf-missing', role: 'status' }, 'agente não encontrado'),
+      el('p', { class: 'muted small' }, 'Ele não está mais na lista (o arquivo de presença sumiu ou a sessão fechou).'),
+      el('button', { class: 'btn', type: 'button', onclick: () => goRoute(null) }, 'Voltar à jornada'),
+    )
+  }
+  const estado = estadoOf(a)
+  box.replaceChildren(
+    ...[
+    el(
+      'div',
+      { class: `pf-head ag-${estado}` },
+      avatarEl(a, 'l'),
+      el(
+        'div',
+        { class: 'pf-id' },
+        el('h1', {}, a.nome),
+        a.papel && el('div', { class: 'muted' }, a.papel),
+        el('span', { class: 'ag-state' }, el('i', { class: 'ag-dot', 'aria-hidden': 'true' }), ESTADO_PT[estado]),
+      ),
+    ),
+    a.erro && el('div', { class: 'ag-error', role: 'alert' }, '⚠ ', a.erro),
+    el(
+      'div',
+      { class: 'pf-fields' },
+      field('Fazendo', a.fazendo ?? '—'),
+      field('Fila', a.fila === null || a.fila === undefined ? '—' : String(a.fila)),
+      field('Sessão', a.sessao ? el('span', { class: 'mono', title: a.sessao }, a.sessao.slice(0, 8)) : '—'),
+      field('Atualizado', el('span', { id: 'pf-age' }, ago(a.atualizadoEm))),
+    ),
+    a.tipo === 'ultron' && a.sessao && el('button', { class: 'btn', type: 'button', onclick: () => goRoute(null, a.sessao) }, 'Abrir a jornada'),
+    el('h2', { class: 'pf-sub' }, 'Projetos'),
+    a.projetos?.length
+      ? el(
+          'ul',
+          { class: 'pf-projects' },
+          a.projetos.map(p =>
+            el(
+              'li',
+              {},
+              el('span', { class: 'pf-repo mono' }, p.repo),
+              p.item && el('span', { class: 'pf-item mono' }, p.item),
+              p.titulo && el('span', { class: 'pf-title' }, p.titulo),
+              p.estado && el('span', { class: 'ag-badge' }, p.estado),
+              isHttp(p.link) && el('a', { href: p.link, target: '_blank', rel: 'noopener noreferrer' }, 'abrir ↗'),
+            ),
+          ),
+        )
+      : el('p', { class: 'muted small' }, 'Nenhum projeto informado.'),
+    el('p', { class: 'muted small pf-note' }, 'Passos, linha do tempo e custo ao vivo chegam na próxima etapa da torre.'),
+    ].filter(Boolean),
+  )
 }
 
 function renderAge() {
-  const s = Math.max(0, Math.round((Date.now() - AG.lastAt) / 1000))
-  $('agentes-age').textContent = AG.lastAt ? `atualizado há ${s < 60 ? `${s}s` : `${Math.floor(s / 60)} min`}` : ''
+  const a = AG.sel !== null ? AG.agentes?.find(x => x.id === AG.sel) : null
+  const n = $('pf-age')
+  if (a && n) n.textContent = ago(a.atualizadoEm)
 }
 
 function applyAgentes(body) {
@@ -541,7 +647,6 @@ async function pollAgentes() {
     const r = await fetch('/api/torre/agentes')
     if (!r.ok) throw new Error(`HTTP ${r.status}`)
     const body = await r.json()
-    if (AG.tab !== 'agentes') return
     AG.warn = AG.source?.readyState === 1 ? '' : 'Conexão ao vivo indisponível. Atualizando a cada 5 s.'
     applyAgentes(body)
   } catch (err) {
@@ -562,7 +667,8 @@ function stopPolling() {
 }
 
 function connectAgentes() {
-  closeAgentes()
+  AG.source?.close()
+  stopPolling()
   AG.source = new EventSource('/api/torre/stream')
   AG.source.onopen = () => {
     AG.live = true
@@ -587,38 +693,37 @@ function connectAgentes() {
   }
 }
 
-function closeAgentes() {
-  AG.source?.close()
-  AG.source = null
-  stopPolling()
-  AG.live = false
+setInterval(renderAge, 1000)
+
+// ---- rota: `#agente=<id>` abre o perfil; sem hash, a jornada
+
+function routeId() {
+  const m = location.hash.match(/^#agente=(.+)$/)
+  if (!m) return null
+  try {
+    return decodeURIComponent(m[1])
+  } catch {
+    return null
+  }
 }
 
-setInterval(() => AG.tab === 'agentes' && renderAge(), 1000)
-
-function setTab(tab, { push = true } = {}) {
-  AG.tab = tab === 'agentes' ? 'agentes' : 'jornada'
-  const isAg = AG.tab === 'agentes'
-  $('view-agentes').hidden = !isAg
-  $('view-jornada').hidden = isAg
-  $('top-right').hidden = isAg
-  for (const b of document.querySelectorAll('.tab')) {
-    b.classList.toggle('on', b.dataset.tab === AG.tab)
-    b.setAttribute('aria-selected', String(b.dataset.tab === AG.tab))
-  }
-  if (push) history.replaceState(null, '', `${location.pathname}${location.search}${isAg ? '#agentes' : ''}`)
-  if (isAg) {
-    renderAgentes()
-    connectAgentes()
-  } else {
-    closeAgentes()
+/** Mostra o que a URL pede; idempotente. */
+function applyRoute() {
+  AG.sel = routeId()
+  const isProfile = AG.sel !== null
+  $('perfil').hidden = !isProfile
+  $('view-jornada').hidden = isProfile
+  if (isProfile) renderPerfil()
+  else {
     S.walker = { left: null, movingUntil: 0 }
     if (S.run) renderJourney(S.run)
   }
+  renderAgentes()
 }
 
-function openJourney(sid) {
-  if (sid !== S.sid) {
+/** Navega (com entrada no histórico): id abre o perfil, null abre a jornada, de `sid` se vier. */
+function goRoute(id, sid) {
+  if (sid && sid !== S.sid) {
     S.sid = sid
     S.run = null
     S.walker = { left: null, movingUntil: 0 }
@@ -626,12 +731,28 @@ function openJourney(sid) {
     connect()
     render()
   }
-  setTab('jornada', { push: false })
-  history.replaceState(null, '', `?session=${encodeURIComponent(S.sid)}`)
+  const url = `${location.pathname}${S.sid ? `?session=${encodeURIComponent(S.sid)}` : ''}${id === null ? '' : `#agente=${encodeURIComponent(id)}`}`
+  if (url !== `${location.pathname}${location.search}${location.hash}`) history.pushState(null, '', url)
+  applyRoute()
 }
 
-for (const b of document.querySelectorAll('.tab')) b.onclick = () => setTab(b.dataset.tab)
-window.addEventListener('hashchange', () => setTab(location.hash === '#agentes' ? 'agentes' : 'jornada', { push: false }))
+function openAgent(a) {
+  if (a.tipo === 'ultron' && a.sessao) goRoute(null, a.sessao)
+  else goRoute(a.id)
+}
+
+window.addEventListener('popstate', () => {
+  const sid = new URLSearchParams(location.search).get('session')
+  if (sid && sid !== S.sid) {
+    S.sid = sid
+    S.run = null
+    renderSessions()
+    connect()
+    render()
+  }
+  applyRoute()
+})
+window.addEventListener('hashchange', applyRoute)
 
 // ------------------------------------------------------------ actions
 
@@ -680,13 +801,7 @@ $('add-form').onsubmit = async e => {
   }
 }
 
-$('session').onchange = e => {
-  S.sid = e.target.value
-  S.run = null
-  S.walker = { left: null, movingUntil: 0 }
-  history.replaceState(null, '', `?session=${encodeURIComponent(S.sid)}${location.hash}`)
-  connect()
-}
+$('session').onchange = e => goRoute(null, e.target.value || S.sid)
 
 window.addEventListener('resize', () => S.run && renderJourney(S.run))
 
@@ -719,7 +834,8 @@ async function start() {
   await loadRuns()
   connect()
   render()
-  setTab(location.hash === '#agentes' ? 'agentes' : 'jornada', { push: false })
+  applyRoute()
+  connectAgentes()
   setInterval(loadRuns, 10_000)
   requestAnimationFrame(frame)
 }

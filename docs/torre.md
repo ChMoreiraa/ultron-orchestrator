@@ -125,9 +125,26 @@ Rotas (só `GET`, mesmas regras de loopback e `Host` do resto do servidor):
   O `avatar` da lista só aponta para arquivo que passa nessas mesmas checagens, e a tela só usa em `src` o que
   começar com `/api/torre/avatar/`.
 
-Tela: abas **Jornada** e **Agentes** no topo (a escolhida fica no `#agentes` da URL). Agentes é uma grade de
-cartões: avatar ou iniciais, ponto de estado, nome, papel, `fazendo`, e um selo para `sessão` e `Ultron`. Clicar
-num cartão do Ultron abre a jornada daquela sessão; os outros cliques ficam para a T2.
+Tela (revista em 05/11/2026, pedido do Carlos): **sem abas**. Os agentes ficam numa **lista lateral à esquerda da
+Jornada**, como a lista de conversas do WhatsApp: por linha, a foto (avatar ou iniciais num círculo de cor fixa por
+`id`), o nome, a prévia de uma linha (`fazendo`, ou o papel quando não houver), a hora de `atualizadoEm` (HH:MM hoje,
+DD/MM antes) e o ponto de estado; quem está `aguardando` ganha um selo em destaque, como mensagem não lida. A linha
+aberta fica marcada.
+
+- **Ultron** (as runs) é a "conversa" padrão: clicar abre a jornada daquela sessão, como o seletor de sessão faz.
+- **Outro agente:** clicar troca o painel da direita pelo **perfil** do agente com o que a presença dá: foto grande,
+  nome, papel, estado, `fazendo`, `fila`, `erro`, `projetos` (com link), sessão e "atualizado há". O perfil completo
+  ao vivo (passos, linha do tempo, custo) é a T2. O perfil aberto fica na URL (`#agente=<id>`); sem ele, a jornada.
+- Tela estreita (celular): a lista vira uma faixa horizontal de fotos acima do painel.
+
+**Sessões na lista:** a config pessoal decide (`~/.claude/ultron/config.json`, `torre.sessoes`, padrão `false`).
+Desligado, o servidor não devolve agentes `tipo: 'sessao'`; a presença e o Ultron aparecem sempre.
+
+**Hashiras:** não têm mod próprio. O mod do Higuruma (fora deste repositório) escreve, a cada aviso de presença,
+`~/.claude/agentes/hashira-<nome>.json` para os 10 Hashiras (M0 Rengoku … M9 Zenitsu): `nome`, `papel`
+("Hashira M<n> · ouvidoria-controller"), `estado` `executando` (ou `aguardando`, se a aba pede permissão) quando uma aba
+da ouvidoria está numa issue da milestone dele, senão `ocioso`; `fazendo` "#<n> <título>" ou "sem missão"; `sessao`
+da aba; `avatar` `hashira-<nome>.png` quando existir. Fotos são fan art: ficam em `~/.claude/agentes/`, nunca aqui.
 
 ## Funcionalidades
 

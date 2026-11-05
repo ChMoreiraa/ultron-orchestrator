@@ -308,12 +308,52 @@ test('servidor: um agente novo aparece só por escrever o arquivo de presença',
   assert.deepEqual(depois.agentes.map(a => [a.id, a.estado]), [['novo', 'executando']])
 })
 
-test('servidor: a sessão do próprio processo aparece, sem o caminho inteiro', async () => {
+const config = v => writeFileSync(join(amb.ultronHome, 'config.json'), JSON.stringify(v))
+const primeiroQuadro = async () => {
+  const ctrl = new AbortController()
+  const r = await fetch(`${BASE}/api/torre/stream`, { signal: ctrl.signal })
+  const { value } = await r.body.getReader().read()
+  ctrl.abort()
+  return JSON.parse(new TextDecoder().decode(value).slice(6))
+}
+
+test('servidor: sessões ficam fora por padrão, no GET e no stream; presença continua', async () => {
   amb.sessao(process.pid, { sessionId: 'viva', cwd: 'C:\\segredo\\pasta-x', status: 'busy' })
+  const { agentes } = await (await fetch(`${BASE}/api/torre/agentes`)).json()
+  assert.ok(!agentes.some(a => a.tipo === 'sessao'))
+  assert.ok(agentes.some(a => a.id === 'novo'))
+  assert.ok(!(await primeiroQuadro()).agentes.some(a => a.tipo === 'sessao'))
+})
+
+test('servidor: torre.sessoes true na config traz as sessões, sem reiniciar, sem o caminho inteiro; false tira de novo', async () => {
+  config({ torre: { sessoes: true } })
   const { agentes } = await (await fetch(`${BASE}/api/torre/agentes`)).json()
   const s = agentes.find(a => a.id === 'sessao:viva')
   assert.equal(s.pasta, 'pasta-x')
   assert.ok(!JSON.stringify(agentes).includes('segredo'))
+  assert.ok((await primeiroQuadro()).agentes.some(a => a.id === 'sessao:viva'))
+  config({ torre: { sessoes: 'sim' } }) // só true liga
+  assert.ok(!(await (await fetch(`${BASE}/api/torre/agentes`)).json()).agentes.some(a => a.tipo === 'sessao'))
+  config({ torre: { sessoes: false } })
+  assert.ok(!(await (await fetch(`${BASE}/api/torre/agentes`)).json()).agentes.some(a => a.tipo === 'sessao'))
+})
+
+test('servidor: ligar a config com o stream aberto manda a sessão em até ~2 s', async () => {
+  const ctrl = new AbortController()
+  const reader = (await fetch(`${BASE}/api/torre/stream`, { signal: ctrl.signal })).body.getReader()
+  try {
+    await reader.read()
+    config({ torre: { sessoes: true } })
+    let texto = ''
+    while (!texto.includes('sessao:viva')) {
+      const { value, done } = await reader.read()
+      assert.ok(!done, 'o stream fechou')
+      texto += new TextDecoder().decode(value)
+    }
+  } finally {
+    ctrl.abort()
+    config({})
+  }
 })
 
 test('servidor: o stream manda o corpo logo ao conectar', async () => {

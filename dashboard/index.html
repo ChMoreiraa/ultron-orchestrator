@@ -15,10 +15,6 @@
         <span class="brand-name">ULTRON</span>
         <span class="brand-sub">orquestrador de modelos</span>
       </div>
-      <nav class="tabs" role="tablist" aria-label="Seções">
-        <button id="tab-jornada" class="tab on" role="tab" aria-selected="true" data-tab="jornada">Jornada</button>
-        <button id="tab-agentes" class="tab" role="tab" aria-selected="false" data-tab="agentes">Agentes</button>
-      </nav>
       <div id="top-right" class="top-right">
         <select id="session" aria-label="Sessão"></select>
         <span id="live" class="pill pill-muted" title="Conexão com o dashboard">● offline</span>
@@ -27,22 +23,18 @@
     </header>
 
     <main id="app">
-      <section id="view-agentes" class="agentes" hidden>
-        <div class="section-head">
+      <div class="torre">
+      <aside id="lista" class="lista" aria-label="Agentes">
+        <div class="lista-head">
           <h2>Agentes</h2>
-          <span class="agentes-status">
-            <span id="agentes-live" class="pill pill-muted">● offline</span>
-            <span id="agentes-age" class="muted small"></span>
-          </span>
+          <span id="agentes-live" class="pill pill-muted">● offline</span>
         </div>
         <div id="agentes-warn" class="agentes-warn" role="alert" hidden></div>
-        <div id="agentes-grid" class="agentes-grid"></div>
-        <section id="agentes-empty" class="panel empty" hidden>
-          <h2>Nenhum agente ainda</h2>
-          <p>Um agente aparece aqui quando escreve o próprio estado em <code>~/.claude/agentes/&lt;id&gt;.json</code>.</p>
-        </section>
-      </section>
-
+        <div id="agentes-list" class="lista-rows"></div>
+        <p id="agentes-empty" class="muted small lista-vazia" hidden>Nenhum agente ainda. Um agente aparece aqui quando escreve <code>~/.claude/agentes/&lt;id&gt;.json</code>.</p>
+      </aside>
+      <div class="torre-main">
+      <section id="perfil" class="panel perfil" hidden></section>
       <div id="view-jornada">
       <section id="empty" class="panel empty" hidden>
         <canvas id="empty-sprite" class="pixel big" width="24" height="24" aria-hidden="true"></canvas>
@@ -154,6 +146,8 @@
             </section>
           </aside>
         </div>
+      </div>
+      </div>
       </div>
       </div>
     </main>

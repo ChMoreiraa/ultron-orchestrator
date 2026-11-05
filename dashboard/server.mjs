@@ -116,7 +116,12 @@ function stream(req, res, sid) {
 
 // Torre de controle (só leitura): a lógica fica em torre/, aqui só a montagem das rotas.
 const CLAUDE_DIR = claudeDirPadrao()
-const torre = () => corpo({ claudeDir: CLAUDE_DIR, ultronHome: HOME })
+// Sessões sem presença só entram se a config pessoal pedir (torre.sessoes: true); lida a cada ciclo, sem reiniciar.
+const torre = () => {
+  const data = corpo({ claudeDir: CLAUDE_DIR, ultronHome: HOME })
+  if (readConfig().torre?.sessoes === true) return data
+  return { ...data, agentes: data.agentes.filter(a => a.tipo !== 'sessao') }
+}
 
 // Um só relógio para todas as conexões: a leitura das pastas não cresce com o número de abas abertas.
 const torreClientes = new Set()
