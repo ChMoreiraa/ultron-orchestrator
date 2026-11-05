@@ -13,7 +13,7 @@ const HOME = mkdtempSync(join(tmpdir(), 'ultron-test-'))
 const PORT = 45000 + Math.floor(Math.random() * 1000)
 const BASE = `http://127.0.0.1:${PORT}`
 const SID = 'sess-test'
-const env = { ...process.env, ULTRON_HOME: HOME, ULTRON_PORT: String(PORT) }
+const env = { ...process.env, ULTRON_HOME: HOME, CLAUDE_CONFIG_DIR: HOME, ULTRON_PORT: String(PORT) }
 
 const cli = (...args) => execFileSync(process.execPath, [join(ROOT, 'bin', 'ultron.mjs'), ...args, '--session', SID], { env, encoding: 'utf8', stdio: 'pipe' })
 

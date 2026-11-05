@@ -90,7 +90,7 @@ async function loadRuns() {
   }
   if (!S.sid && S.runs[0]) {
     S.sid = S.runs[0].sessionId
-    history.replaceState(null, '', `?session=${encodeURIComponent(S.sid)}`)
+    history.replaceState(null, '', `?session=${encodeURIComponent(S.sid)}${location.hash}`)
     connect()
   }
   renderSessions()
@@ -454,6 +454,185 @@ function renderLog(run) {
   )
 }
 
+// ------------------------------------------------------------ agentes (torre T1)
+
+const AG = { tab: 'jornada', agentes: null, geradoEm: null, lastAt: 0, live: false, warn: '', source: null, poll: null }
+const ESTADO_PT = { aguardando: 'aguardando você', executando: 'executando', pausado: 'pausado', ocioso: 'ocioso', sem_sinal: 'sem sinal' }
+
+const initials = nome =>
+  String(nome ?? '')
+    .split(/[\s\-_./]+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map(w => Array.from(w)[0].toUpperCase())
+    .join('') || '?'
+
+function agentCard(a) {
+  const estado = ESTADO_PT[a.estado] ? a.estado : 'ocioso'
+  const isUltron = a.tipo === 'ultron' && Boolean(a.sessao)
+  const fallback = () => el('span', { class: 'ag-avatar ag-initials', 'aria-hidden': 'true' }, initials(a.nome))
+  // Só o próprio servidor serve avatar: qualquer outro valor (URL externa, javascript:) vira as iniciais.
+  const hasAvatar = typeof a.avatar === 'string' && /^\/api\/torre\/avatar\/[A-Za-z0-9._-]+\.png$/.test(a.avatar)
+  const avatar = hasAvatar ? el('img', { class: 'ag-avatar', src: a.avatar, alt: '', loading: 'lazy', onerror: e => e.target.replaceWith(fallback()) }) : fallback()
+  const props = { class: `ag-card ag-${estado}${isUltron ? ' ag-click' : ''}`, 'data-id': a.id }
+  if (isUltron) {
+    props.role = 'button'
+    props.tabindex = '0'
+    props.title = 'Abrir a jornada desta sessão'
+    props.onclick = () => openJourney(a.sessao)
+    props.onkeydown = e => {
+      if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault()
+        openJourney(a.sessao)
+      }
+    }
+  }
+  return el(
+    'article',
+    props,
+    el(
+      'div',
+      { class: 'ag-top' },
+      avatar,
+      el(
+        'div',
+        { class: 'ag-id' },
+        el('div', { class: 'ag-name' }, a.nome, a.tipo === 'sessao' && el('span', { class: 'ag-badge' }, 'sessão'), a.tipo === 'ultron' && el('span', { class: 'ag-badge ag-badge-ultron' }, 'Ultron')),
+        a.papel && el('div', { class: 'ag-role muted small' }, a.papel),
+        a.tipo === 'sessao' && a.pasta && el('div', { class: 'ag-dir mono muted small' }, a.pasta),
+      ),
+      el('span', { class: 'ag-state' }, el('i', { class: 'ag-dot', 'aria-hidden': 'true' }), ESTADO_PT[estado]),
+    ),
+    a.fazendo && el('div', { class: 'ag-doing' }, a.fazendo),
+    a.erro && el('div', { class: 'ag-error', role: 'alert' }, '⚠ ', a.erro),
+    a.fila > 0 && el('div', { class: 'ag-queue muted small' }, `fila: ${a.fila}`),
+  )
+}
+
+function renderAgentes() {
+  const list = AG.agentes
+  $('agentes-empty').hidden = !(list && list.length === 0)
+  $('agentes-grid').hidden = !list?.length
+  $('agentes-grid').replaceChildren(...(list ?? []).map(agentCard))
+  const live = $('agentes-live')
+  live.textContent = AG.live ? '● ao vivo' : '● offline'
+  live.className = `pill ${AG.live ? 'pill-ok' : 'pill-muted'}`
+  const warn = $('agentes-warn')
+  warn.hidden = !AG.warn
+  warn.textContent = AG.warn
+  renderAge()
+}
+
+function renderAge() {
+  const s = Math.max(0, Math.round((Date.now() - AG.lastAt) / 1000))
+  $('agentes-age').textContent = AG.lastAt ? `atualizado há ${s < 60 ? `${s}s` : `${Math.floor(s / 60)} min`}` : ''
+}
+
+function applyAgentes(body) {
+  if (!body || !Array.isArray(body.agentes)) return
+  AG.agentes = body.agentes
+  AG.geradoEm = typeof body.geradoEm === 'number' ? body.geradoEm : null
+  AG.lastAt = Date.now()
+  renderAgentes()
+}
+
+async function pollAgentes() {
+  try {
+    const r = await fetch('/api/torre/agentes')
+    if (!r.ok) throw new Error(`HTTP ${r.status}`)
+    const body = await r.json()
+    if (AG.tab !== 'agentes') return
+    AG.warn = AG.source?.readyState === 1 ? '' : 'Conexão ao vivo indisponível. Atualizando a cada 5 s.'
+    applyAgentes(body)
+  } catch (err) {
+    AG.warn = `Sem conexão com a torre (${err.message}). Tentando de novo a cada 5 s.`
+    renderAgentes()
+  }
+}
+
+function startPolling() {
+  if (AG.poll) return
+  pollAgentes()
+  AG.poll = setInterval(pollAgentes, 5000)
+}
+
+function stopPolling() {
+  clearInterval(AG.poll)
+  AG.poll = null
+}
+
+function connectAgentes() {
+  closeAgentes()
+  AG.source = new EventSource('/api/torre/stream')
+  AG.source.onopen = () => {
+    AG.live = true
+    AG.warn = ''
+    renderAgentes()
+  }
+  AG.source.onmessage = e => {
+    AG.live = true
+    AG.warn = ''
+    stopPolling()
+    try {
+      applyAgentes(JSON.parse(e.data))
+    } catch {
+      /* a broken frame is replaced by the next one */
+    }
+  }
+  AG.source.onerror = () => {
+    AG.live = false
+    AG.warn = 'Conexão ao vivo caiu. Atualizando a cada 5 s até voltar.'
+    renderAgentes()
+    startPolling()
+  }
+}
+
+function closeAgentes() {
+  AG.source?.close()
+  AG.source = null
+  stopPolling()
+  AG.live = false
+}
+
+setInterval(() => AG.tab === 'agentes' && renderAge(), 1000)
+
+function setTab(tab, { push = true } = {}) {
+  AG.tab = tab === 'agentes' ? 'agentes' : 'jornada'
+  const isAg = AG.tab === 'agentes'
+  $('view-agentes').hidden = !isAg
+  $('view-jornada').hidden = isAg
+  $('top-right').hidden = isAg
+  for (const b of document.querySelectorAll('.tab')) {
+    b.classList.toggle('on', b.dataset.tab === AG.tab)
+    b.setAttribute('aria-selected', String(b.dataset.tab === AG.tab))
+  }
+  if (push) history.replaceState(null, '', `${location.pathname}${location.search}${isAg ? '#agentes' : ''}`)
+  if (isAg) {
+    renderAgentes()
+    connectAgentes()
+  } else {
+    closeAgentes()
+    S.walker = { left: null, movingUntil: 0 }
+    if (S.run) renderJourney(S.run)
+  }
+}
+
+function openJourney(sid) {
+  if (sid !== S.sid) {
+    S.sid = sid
+    S.run = null
+    S.walker = { left: null, movingUntil: 0 }
+    renderSessions()
+    connect()
+    render()
+  }
+  setTab('jornada', { push: false })
+  history.replaceState(null, '', `?session=${encodeURIComponent(S.sid)}`)
+}
+
+for (const b of document.querySelectorAll('.tab')) b.onclick = () => setTab(b.dataset.tab)
+window.addEventListener('hashchange', () => setTab(location.hash === '#agentes' ? 'agentes' : 'jornada', { push: false }))
+
 // ------------------------------------------------------------ actions
 
 $('approve').onclick = () => post({ type: 'approve', revision: S.run?.revision })
@@ -505,7 +684,7 @@ $('session').onchange = e => {
   S.sid = e.target.value
   S.run = null
   S.walker = { left: null, movingUntil: 0 }
-  history.replaceState(null, '', `?session=${encodeURIComponent(S.sid)}`)
+  history.replaceState(null, '', `?session=${encodeURIComponent(S.sid)}${location.hash}`)
   connect()
 }
 
@@ -540,6 +719,7 @@ async function start() {
   await loadRuns()
   connect()
   render()
+  setTab(location.hash === '#agentes' ? 'agentes' : 'jornada', { push: false })
   setInterval(loadRuns, 10_000)
   requestAnimationFrame(frame)
 }

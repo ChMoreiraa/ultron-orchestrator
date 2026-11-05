@@ -6,6 +6,7 @@ import { dirname, extname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 import { EFFORTS, MODELS, PLAYBOOKS, PROFILES, ROLES, TIER_WEIGHT, defaultsFor, runCost } from '../core/run-core.ts'
+import { claudeDirPadrao, corpo, respostaAvatar } from '../torre/agentes.mjs'
 import { HOME, VERSION, listRuns, modAlive, paths, readAgent, readConfig, readRun, submit, writeJsonAtomic } from '../bin/lib/store.mjs'
 
 const DIR = dirname(fileURLToPath(import.meta.url))
@@ -113,6 +114,67 @@ function stream(req, res, sid) {
   })
 }
 
+// Torre de controle (só leitura): a lógica fica em torre/, aqui só a montagem das rotas.
+const CLAUDE_DIR = claudeDirPadrao()
+const torre = () => corpo({ claudeDir: CLAUDE_DIR, ultronHome: HOME })
+
+// Um só relógio para todas as conexões: a leitura das pastas não cresce com o número de abas abertas.
+const torreClientes = new Set()
+let torreTick = null
+let torreUltimo = ''
+const quadro = data => `data: ${JSON.stringify(data)}\n\n`
+
+function torreDifunde() {
+  let data
+  try {
+    data = torre()
+  } catch {
+    return
+  }
+  const key = JSON.stringify(data.agentes)
+  if (key === torreUltimo) return
+  torreUltimo = key
+  const frame = quadro(data)
+  for (const c of torreClientes) c.res.write(frame)
+}
+
+function torreStream(req, res) {
+  res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-store', connection: 'keep-alive' })
+  try {
+    const data = torre()
+    res.write(quadro(data))
+    // O primeiro cliente fixa a base de comparação; os outros podem receber de novo o que já têm, sem prejuízo.
+    if (!torreTick) torreUltimo = JSON.stringify(data.agentes)
+  } catch {}
+  const ping = setInterval(() => res.write(': ping\n\n'), 15_000)
+  const client = { res }
+  streams.add(client)
+  torreClientes.add(client)
+  torreTick ??= setInterval(torreDifunde, 2000)
+  req.on('close', () => {
+    clearInterval(ping)
+    streams.delete(client)
+    torreClientes.delete(client)
+    if (torreClientes.size === 0) {
+      clearInterval(torreTick)
+      torreTick = null
+      torreUltimo = ''
+    }
+    lastSeen = Date.now()
+  })
+}
+
+function torreAvatar(res, raw) {
+  let nome = ''
+  try {
+    nome = decodeURIComponent(raw)
+  } catch {}
+  const r = respostaAvatar(CLAUDE_DIR, nome)
+  if (r.status !== 200) return json(res, 404, { error: 'não encontrado' })
+  res.writeHead(200, { 'content-type': 'image/png', 'x-content-type-options': 'nosniff', 'cache-control': 'no-store', 'content-length': r.body.length })
+  res.end(r.body)
+}
+
 const server = createServer(async (req, res) => {
   lastSeen = Date.now()
   const url = new URL(req.url ?? '/', `http://127.0.0.1:${PORT}`)
@@ -128,6 +190,10 @@ const server = createServer(async (req, res) => {
     if (req.method === 'GET' && path === '/api/health') return json(res, 200, { app: 'ultron', pid: process.pid, port: PORT, version: VERSION })
     if (req.method === 'GET' && path === '/api/meta') return json(res, 200, meta())
     if (req.method === 'GET' && path === '/api/runs') return json(res, 200, { runs: listRuns() })
+    if (req.method === 'GET' && path === '/api/torre/agentes') return json(res, 200, torre())
+    if (req.method === 'GET' && path === '/api/torre/stream') return torreStream(req, res)
+    const av = path.match(/^\/api\/torre\/avatar\/([^/]+)$/)
+    if (req.method === 'GET' && av) return torreAvatar(res, av[1])
     const m = path.match(/^\/api\/runs\/([^/]+)(\/stream|\/commands)?$/)
     if (m) {
       const sid = decodeURIComponent(m[1])

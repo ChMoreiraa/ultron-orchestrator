@@ -1,6 +1,6 @@
 # Torre de controle
 
-> Especificação. Só a T4 (custo real na run do Ultron) está implementada; o resto ainda não. Autor: Carlos Henrique Moreira Gonçalves.
+> Especificação. Implementadas: T4 (custo real na run do Ultron), protocolo de presença v2 e T1 (galeria); o resto ainda não. Autor: Carlos Henrique Moreira Gonçalves.
 
 ## O que é
 
@@ -68,6 +68,66 @@ Compatível com o v1 (os quatro primeiros campos já existem). Tudo novo é opci
 - `sessao`: liga o agente à sessão em que trabalha, para o perfil mostrar os passos ao vivo.
 - `fazendo` é uma linha curta e **nunca** um comando inteiro: um comando pode carregar segredo.
 - Sessão sem arquivo de presença aparece mesmo assim, como agente "sessão", com o nome da pasta e o título.
+- `id` é opcional: sem ele, vale o nome do arquivo sem `.json` (é o caso de todo arquivo v1). Campos desconhecidos
+  são ignorados.
+
+## Contrato da T1
+
+Código em `torre/agentes.mjs` (Node, sem dependências). `listarAgentes({ claudeDir, ultronHome, now, pidVivo })`
+devolve a lista já ordenada; as dependências entram por parâmetro para os testes. `claudeDir` é
+`CLAUDE_CONFIG_DIR` ou `~/.claude`; `ultronHome` é o `HOME` de `bin/lib/store.mjs`.
+
+```ts
+type Agente = {
+  id: string            // presença: id ou nome do arquivo; sessão: "sessao:<sessionId>"; Ultron: "ultron:<sessionId>"
+  tipo: 'presenca' | 'sessao' | 'ultron'
+  nome: string          // presença: nome ou id; sessão: name ou pasta; Ultron: "Ultron"
+  papel: string | null
+  estado: 'aguardando' | 'executando' | 'pausado' | 'ocioso' | 'sem_sinal'
+  fazendo: string | null // uma linha, sem quebras, cortada em 120 caracteres
+  fila: number | null
+  erro: string | null
+  atualizadoEm: number | null
+  avatar: string | null  // "/api/torre/avatar/<arquivo>.png", só se o arquivo existir
+  sessao: string | null
+  pasta: string | null   // só o nome da pasta (basename do cwd), nunca o caminho inteiro
+  projetos: { repo: string; item: string | null; titulo: string | null; estado: string | null; link: string | null }[]
+}
+```
+
+Regras:
+
+- **Presença:** só `<claudeDir>/agentes/*.json`. Arquivo pela metade ou inválido é ignorado. `estado` fora da lista
+  vira `ocioso`; `atualizadoEm` ausente ou a mais de 2 min de agora (para trás ou para a frente) vira `sem_sinal`.
+  Texto que não for string vira `null`; `link` só se começar com `https://` ou `http://`; `projetos` até 20.
+- **Sessões:** só `<claudeDir>/sessions/*.json`, e só as de processo vivo (`pidVivo(pid)`). `status`: `busy` →
+  `executando` ("trabalhando"), `waiting` → `aguardando` ("esperando você"), o resto → `ocioso`. Sessão citada no
+  `sessao` de uma presença, ou que tenha run do Ultron listada, não aparece de novo.
+- **Ultron:** uma entrada por `<ultronHome>/runs/<sessão>/run.json` que não terminou (`done`, `failed` e `cancelled`
+  ficam fora). `awaiting_approval` → `aguardando` ("aguarda aprovação do plano"); `approved`/`running` →
+  `executando` ("<feitas>/<total> etapas · <objetivo>"); `paused` → `pausado`; batimento do mod parado → `sem_sinal`.
+  **Abandono:** sem batimento e com o último sinal (o maior entre o batimento e o `updatedAt` da run, ou a hora do
+  arquivo sem `updatedAt`) há mais de 24 h, a run sai da galeria (sessão fechada sem `finish` nunca termina) e deixa
+  de esconder a sessão. Ela continua no seletor da aba Jornada.
+- **Ordem:** aguardando, executando, pausado, ocioso, sem sinal; depois por nome.
+- **Nunca** abre outro arquivo: nada de `.key`, `.env`, `.credentials*`, nem `.jsonl` nesta fase. Só arquivo comum
+  (link simbólico ou junção é ignorado) e com teto de tamanho, conferido antes de ler: 256 KB para presença, sessão
+  e `mod.json`, 4 MB para `run.json`. O que passar disso é ignorado.
+
+Rotas (só `GET`, mesmas regras de loopback e `Host` do resto do servidor):
+
+- `/api/torre/agentes` → `{ agentes: Agente[], geradoEm: number }`.
+- `/api/torre/stream` → SSE; confere a cada 2 s e manda `data: <mesmo corpo>` quando algo muda (e logo ao conectar).
+  Um só relógio para todas as conexões: a leitura das pastas não cresce com o número de abas.
+- `/api/torre/avatar/<arquivo>.png` → só nome que case com `^[A-Za-z0-9._-]+\.png$`, sem `..`, resolvido dentro de
+  `<claudeDir>/agentes/` (também depois de resolver links), arquivo comum, até 1 MB e começando com a assinatura de
+  PNG (um link duro para outro arquivo não sai como imagem); `image/png` com `nosniff`. Qualquer outra coisa é 404.
+  O `avatar` da lista só aponta para arquivo que passa nessas mesmas checagens, e a tela só usa em `src` o que
+  começar com `/api/torre/avatar/`.
+
+Tela: abas **Jornada** e **Agentes** no topo (a escolhida fica no `#agentes` da URL). Agentes é uma grade de
+cartões: avatar ou iniciais, ponto de estado, nome, papel, `fazendo`, e um selo para `sessão` e `Ultron`. Clicar
+num cartão do Ultron abre a jornada daquela sessão; os outros cliques ficam para a T2.
 
 ## Funcionalidades
 
