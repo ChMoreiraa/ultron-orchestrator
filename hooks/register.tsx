@@ -235,7 +235,11 @@ export const register: Register = on => {
     const sessionId = await $.session.id()
     const p = await pathsFor($, sessionId)
     const run = await readJson<Run | null>($, p.run, null)
-    if ((await isActive($)) || (run && run.revision > 0 && !isTerminal(run.status))) await activate($)
+    // `autoActivate` in config.json: every session with a person at the prompt opens with the pane on.
+    // Planning still waits for /ultron; a `-p` run or the SDK stays inert.
+    const cfg = await readJson<{ autoActivate?: unknown }>($, p.config, {})
+    const isAuto = cfg.autoActivate === true && e.isInteractive
+    if (isAuto || (await isActive($)) || (run && run.revision > 0 && !isTerminal(run.status))) await activate($)
     return r
   })
 

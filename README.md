@@ -178,7 +178,7 @@ O plugin é genérico. O que é da sua equipe fica na sua máquina, em `~/.claud
 
 | arquivo | para quê |
 |---|---|
-| `config.json` | `profile` (perfil padrão), `port` (porta do dashboard, padrão `4477`), `defaultOwner` (owner usado quando você diz só o nome do repo, ex.: `"acme"`), `reposDir` (pasta onde ficam seus clones, para a revisão reaproveitá-los) |
+| `config.json` | `profile` (perfil padrão), `port` (porta do dashboard, padrão `4477`), `defaultOwner` (owner usado quando você diz só o nome do repo, ex.: `"acme"`), `reposDir` (pasta onde ficam seus clones, para a revisão reaproveitá-los), `autoActivate` (`true` liga o mod e o painel em toda sessão interativa nova; planejar continua só com `/ultron`, e `claude -p` fica inerte) |
 | `review-comment.md` | o padrão de comentário de revisão da sua equipe (regras da organização, checks obrigatórios, tom, idioma). Quando existe, substitui o padrão genérico do plugin |
 | `agents/<owner>__<repo>.md` | o agente revisor de cada repositório, criado e atualizado pelas revisões; você pode editar o `## Contexto do repo` à mão |
 

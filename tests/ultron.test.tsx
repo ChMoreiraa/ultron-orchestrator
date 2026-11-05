@@ -65,6 +65,7 @@ function world(on: On, seed: Record<string, string>, opts: { unreadable?: string
   const clock = mock.clock(on, { now: 1_000 })
   mock.env(on, { USERPROFILE: HOME })
   on('session.id', () => ({ value: SID }))
+  on('session.start', (_, e) => ({ cwd: e.cwd }))
   on('env.set', () => ({ value: {} }))
   on('ui.open', () => ({ value: { isPlaced: true } }))
   on('fs.exists', (_, e) => ({ value: key(e.path) in files }))
@@ -158,6 +159,27 @@ test('an approval sent from the dashboard is applied and told to the session', a
   expect(saved.approval.by).toBe('dashboard')
   expect(saved.acks.c1.ok).toBe(true)
   expect(told.join(' ')).toMatch(/APROVOU o plano no dashboard/)
+})
+
+const CONFIG = `${HOME}/.claude/ultron/config.json`
+const start = ($: Engine, isInteractive: boolean) => $.session.start({ cwd: HOME, surface: isInteractive ? 'terminal' : null, isInteractive })
+
+test('without autoActivate, a new session leaves the mod off', async ($, on) => {
+  const { files } = world(on, { [CONFIG]: '{"profile":"equilibrado"}' })
+  await start($, true)
+  expect(`${HOME}/.claude/ultron/runs/${SID}/mod.json` in files).toBe(false)
+})
+
+test('with autoActivate, an interactive session opens with the mod on', async ($, on) => {
+  const { files } = world(on, { [CONFIG]: '{"autoActivate":true}' })
+  await start($, true)
+  expect(`${HOME}/.claude/ultron/runs/${SID}/mod.json` in files).toBe(true)
+})
+
+test('with autoActivate, a -p run stays off', async ($, on) => {
+  const { files } = world(on, { [CONFIG]: '{"autoActivate":true}' })
+  await start($, false)
+  expect(`${HOME}/.claude/ultron/runs/${SID}/mod.json` in files).toBe(false)
 })
 
 const AGENT_FILE = `${HOME}/.claude/ultron/agents/acme__meu-app.md`
