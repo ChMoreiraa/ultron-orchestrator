@@ -7,7 +7,7 @@ import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 import { AGENT_REPO, EFFORTS, MODELS, PROFILES, ROLES, agentName, defaultsFor, escalate, summarize, validatePlan } from '../core/run-core.ts'
-import { AGENTS_DIR, HOME, agentFile, ensureConfig, listAgents, modAlive, readAgent, readConfig, readRun, submit } from './lib/store.mjs'
+import { AGENTS_DIR, HOME, VERSION, agentFile, ensureConfig, isOlder, listAgents, modAlive, readAgent, readConfig, readRun, submit } from './lib/store.mjs'
 
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)))
 const AGENT_TEMPLATE = join(ROOT, 'skills', 'ultron', 'references', 'agent-template.md')
@@ -119,17 +119,29 @@ function table(profile) {
 const port = () => Number(process.env.ULTRON_PORT) || Number(readConfig().port) || 4477
 const dashboardUrl = sid => `http://127.0.0.1:${port()}/?session=${encodeURIComponent(sid)}`
 
-async function isServerUp() {
+/** The running dashboard's health ({ app, pid, version }), or null when none answers. */
+async function health() {
   try {
     const r = await fetch(`http://127.0.0.1:${port()}/api/health`, { signal: AbortSignal.timeout(800) })
-    return r.ok && (await r.json()).app === 'ultron'
+    const h = r.ok ? await r.json() : null
+    return h?.app === 'ultron' ? h : null
   } catch {
-    return false
+    return null
   }
 }
 
+const isServerUp = async () => (await health()) !== null
+
 async function ensureServer() {
-  if (await isServerUp()) return true
+  const h = await health()
+  // A server left running by an older copy of the plugin keeps serving the old dashboard: replace it.
+  if (h && !isOlder(h.version, VERSION)) return true
+  if (h && Number.isInteger(h.pid)) {
+    try {
+      process.kill(h.pid)
+    } catch {}
+    for (let i = 0; i < 25 && (await isServerUp()); i++) await new Promise(r => setTimeout(r, 200))
+  }
   const child = spawn(process.execPath, [join(ROOT, 'dashboard', 'server.mjs')], { detached: true, stdio: 'ignore', windowsHide: true, env: process.env })
   child.unref()
   for (let i = 0; i < 25; i++) {

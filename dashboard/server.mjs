@@ -6,7 +6,7 @@ import { dirname, extname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 import { EFFORTS, MODELS, PLAYBOOKS, PROFILES, ROLES, TIER_WEIGHT, defaultsFor, runCost } from '../core/run-core.ts'
-import { HOME, listRuns, modAlive, paths, readAgent, readConfig, readRun, submit, writeJsonAtomic } from '../bin/lib/store.mjs'
+import { HOME, VERSION, listRuns, modAlive, paths, readAgent, readConfig, readRun, submit, writeJsonAtomic } from '../bin/lib/store.mjs'
 
 const DIR = dirname(fileURLToPath(import.meta.url))
 const PORT = Number(process.env.ULTRON_PORT) || Number(readConfig().port) || 4477
@@ -125,7 +125,7 @@ const server = createServer(async (req, res) => {
       res.writeHead(200, { 'content-type': TYPES[extname(file)], 'cache-control': 'no-store' })
       return res.end(readFileSync(file))
     }
-    if (req.method === 'GET' && path === '/api/health') return json(res, 200, { app: 'ultron', pid: process.pid, port: PORT })
+    if (req.method === 'GET' && path === '/api/health') return json(res, 200, { app: 'ultron', pid: process.pid, port: PORT, version: VERSION })
     if (req.method === 'GET' && path === '/api/meta') return json(res, 200, meta())
     if (req.method === 'GET' && path === '/api/runs') return json(res, 200, { runs: listRuns() })
     const m = path.match(/^\/api\/runs\/([^/]+)(\/stream|\/commands)?$/)

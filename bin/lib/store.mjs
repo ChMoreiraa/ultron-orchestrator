@@ -4,13 +4,38 @@
 // has gone quiet (session closed), the command is applied here instead.
 import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, statSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import { randomUUID } from 'node:crypto'
+import { fileURLToPath } from 'node:url'
 
 import { agentName, agentSlug, applyInbox, inboxLines, newRun } from '../../core/run-core.ts'
 
 export const HOME = process.env.ULTRON_HOME || join(homedir(), '.claude', 'ultron')
 export const ALIVE_MS = 6000
+
+const readVersion = () => {
+  try {
+    return JSON.parse(readFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', '..', '.claude-plugin', 'plugin.json'), 'utf8')).version ?? '0.0.0'
+  } catch {
+    return '0.0.0'
+  }
+}
+/** This copy's plugin version: the dashboard reports it, the CLI compares it before reusing a running server. */
+export const VERSION = readVersion()
+
+/** True when version `a` is older than `b` (dotted numbers; a missing or odd version counts as oldest). */
+export function isOlder(a, b) {
+  const parse = v => (typeof v === 'string' && /^\d+(\.\d+)*$/.test(v) ? v.split('.').map(Number) : null)
+  const x = parse(a)
+  const y = parse(b)
+  if (!y) return false
+  if (!x) return true
+  for (let i = 0; i < Math.max(x.length, y.length); i++) {
+    const d = (x[i] ?? 0) - (y[i] ?? 0)
+    if (d) return d < 0
+  }
+  return false
+}
 
 export const DEFAULT_CONFIG = {
   version: 1,

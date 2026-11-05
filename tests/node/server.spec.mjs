@@ -177,3 +177,17 @@ test('the run snapshot carries its cost', async () => {
   assert.equal(r.custo.hasPrices, true)
   assert.equal(r.custo.checkedAt, '2026-11-05')
 })
+
+test('health reports the plugin version, and versions compare as dotted numbers', async () => {
+  const { VERSION, isOlder } = await import('../../bin/lib/store.mjs')
+  const plugin = JSON.parse(readFileSync(join(ROOT, '.claude-plugin', 'plugin.json'), 'utf8'))
+  assert.equal(VERSION, plugin.version)
+  const h = await (await fetch(`${BASE}/api/health`)).json()
+  assert.equal(h.version, plugin.version)
+  assert.equal(isOlder('0.1.0', '0.1.2'), true)
+  assert.equal(isOlder('0.1.10', '0.1.2'), false)
+  assert.equal(isOlder('0.2', '0.1.9'), false)
+  assert.equal(isOlder('0.1.2', '0.1.2'), false)
+  assert.equal(isOlder(undefined, '0.1.2'), true, 'a server too old to report a version gets replaced')
+  assert.equal(isOlder('0.1.2', 'x'), false, 'an unreadable own version never kills a running server')
+})
