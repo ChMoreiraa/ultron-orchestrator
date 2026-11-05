@@ -2,7 +2,7 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 
-import { agentBlock, agentSlug, apply, applyInbox, defaultsFor, escalate, gate, newRun, summarize, validatePlan } from '../../core/run-core.ts'
+import { agentBlock, agentSlug, apply, applyInbox, defaultsFor, escalate, gate, newRun, priceOf, runCost, summarize, usageCost, validatePlan } from '../../core/run-core.ts'
 
 const PLAN = {
   goal: 'Adicionar /health',
@@ -222,4 +222,80 @@ test('an edit changes only the editable fields of a step', () => {
   assert.match(apply(run, { type: 'edit-step', stepId: 'build', patch: { agentType: 'x; rm -rf /' } }, 4).error, /agentType inválido/)
   assert.match(apply(run, { type: 'edit-step', stepId: 'build', patch: { dependsOn: 'map' } }, 4).error, /lista de ids/)
   assert.equal(apply(run, { type: 'edit-step', stepId: 'build', patch: { agentType: 'my-plugin:reviewer' } }, 5).ok, true)
+})
+
+const PRECOS = {
+  conferidoEm: '2026-11-05',
+  modelos: {
+    haiku: { entrada: 0.1, saida: 0.5, leituraCache: 0.01, escritaCache: 0.2 },
+    sonnet: { entrada: 2, saida: 10, leituraCache: 0.1, escritaCache: 4 },
+    opus: { entrada: 4, saida: 20, leituraCache: 0.2, escritaCache: 8 },
+  },
+}
+const U = { input: 1_000_000, output: 1_000_000, cacheRead: 1_000_000, cacheWrite: 1_000_000 }
+const near = (a, b) => assert.ok(Math.abs(a - b) < 1e-9, `${a} != ${b}`)
+const st = (id, model, extra = {}) => ({ id, model, status: 'done', mode: 'agent', ...extra })
+
+test('a usage costs tokens times price per million', () => {
+  near(usageCost(U, PRECOS.modelos.sonnet), 2 + 10 + 0.1 + 4)
+  near(usageCost({ input: 500, output: 0, cacheRead: 0, cacheWrite: 0 }, PRECOS.modelos.opus), 0.002)
+})
+
+test('run cost sums the steps and saves against the strong tier', () => {
+  const c = runCost({ steps: [st('a', 'haiku', { usage: U }), st('b', 'sonnet', { usage: U }), st('c', 'opus', { usage: U })] }, PRECOS)
+  near(c.total, 0.81 + 16.1 + 32.2)
+  near(c.saving, 32.2 * 3 - (0.81 + 16.1 + 32.2))
+  assert.equal(c.unpriced, 0)
+  assert.equal(c.strong, 'opus')
+})
+
+test('run cost leaves out inline, skipped and usage-less steps, and says how many are inline', () => {
+  const c = runCost(
+    { steps: [st('a', 'sonnet', { usage: U }), st('b', 'sonnet', { mode: 'inline' }), st('c', 'sonnet', { status: 'skipped', usage: U }), st('d', 'sonnet', { status: 'pending' })] },
+    PRECOS,
+  )
+  assert.equal(c.steps.length, 1)
+  assert.equal(c.inline, 1)
+  near(c.total, 16.1)
+})
+
+test('a model without a complete price counts tokens but not money', () => {
+  const precos = { modelos: { ...PRECOS.modelos, sonnet: { entrada: 2, saida: 'x', leituraCache: 0.1, escritaCache: 4 }, haiku: undefined } }
+  assert.equal(priceOf(precos, 'sonnet'), null)
+  assert.equal(priceOf(precos, 'haiku'), null)
+  const c = runCost({ steps: [st('a', 'sonnet', { usage: U }), st('b', 'haiku', { usage: U }), st('c', 'opus', { usage: U })] }, precos)
+  assert.equal(c.unpriced, 2)
+  assert.equal(c.steps[0].cost, null)
+  assert.equal(c.tokens, 12_000_000)
+  near(c.total, 32.2)
+  near(c.saving, 0)
+})
+
+test('without precos every step is unpriced and the saving unavailable', () => {
+  for (const precos of [undefined, null, {}]) {
+    const c = runCost({ steps: [st('a', 'opus', { usage: U })] }, precos)
+    assert.equal(c.unpriced, 1)
+    assert.equal(c.total, 0)
+    assert.equal(c.saving, null)
+    assert.equal(c.tokens, 4_000_000)
+  }
+})
+
+test('a usage missing a counter or carrying a bad one never makes the total NaN', () => {
+  const partial = { input: 1_000_000, output: 1_000_000 } // the API may leave the cache counters out
+  const bad = { input: Number.NaN, output: -5, cacheRead: 'x', cacheWrite: 1_000_000 }
+  near(usageCost(partial, PRECOS.modelos.sonnet), 12)
+  const c = runCost({ steps: [st('a', 'sonnet', { usage: partial }), st('b', 'sonnet', { usage: bad })] }, PRECOS)
+  assert.ok(Number.isFinite(c.total) && Number.isFinite(c.saving) && Number.isFinite(c.tokens))
+  near(c.total, 12 + 4)
+  assert.equal(c.tokens, 3_000_000)
+})
+
+test('the strong tier comes from the caller and, unpriced, makes the saving null', () => {
+  const steps = [st('a', 'haiku', { usage: U })]
+  near(runCost({ steps }, PRECOS, 'sonnet').saving, 16.1 - 0.81)
+  const semOpus = { modelos: { haiku: PRECOS.modelos.haiku } }
+  const c = runCost({ steps }, semOpus)
+  assert.equal(c.saving, null)
+  near(c.total, 0.81)
 })

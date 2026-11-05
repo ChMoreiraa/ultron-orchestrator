@@ -157,3 +157,23 @@ test('status and the dashboard name the run’s repo agent', async () => {
 test('the page and its files are served', async () => {
   for (const path of ['/', '/app.js', '/styles.css', '/sprite.js']) assert.equal((await fetch(`${BASE}${path}`)).status, 200, path)
 })
+
+test('meta carries no price without config, and the config prices with the strong tier when there are some', async () => {
+  const none = await (await fetch(`${BASE}/api/meta`)).json()
+  assert.equal(none.precos, null)
+  assert.equal(none.strong, 'opus')
+  const precos = { conferidoEm: '2026-11-05', modelos: { opus: { entrada: 4, saida: 20, leituraCache: 0.2, escritaCache: 8 } } }
+  writeFileSync(join(HOME, 'config.json'), JSON.stringify({ precos, models: { strong: 'sonnet' } }))
+  const meta = await (await fetch(`${BASE}/api/meta`)).json()
+  assert.deepEqual(meta.precos, precos)
+  assert.equal(meta.strong, 'sonnet')
+})
+
+test('the run snapshot carries its cost', async () => {
+  const r = await (await fetch(`${BASE}/api/runs/${SID}`)).json()
+  assert.equal(r.custo.steps.length, 0)
+  assert.equal(r.custo.saving, null)
+  // The label's date and the price flag come with the cost, read from the config at that moment.
+  assert.equal(r.custo.hasPrices, true)
+  assert.equal(r.custo.checkedAt, '2026-11-05')
+})

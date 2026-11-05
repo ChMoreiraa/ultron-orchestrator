@@ -7,6 +7,8 @@ const S = {
   runs: [],
   sid: new URLSearchParams(location.search).get('session') ?? '',
   run: null,
+  /** The run's cost, pushed with every run snapshot; null until one arrives. */
+  custo: null,
   isAlive: false,
   /** The repo agent's name, from its file, when the run carries one. */
   agent: null,
@@ -69,7 +71,7 @@ async function post(cmd) {
       toast(body.error ?? 'Não deu certo', true)
       return false
     }
-    if (body.run) apply({ run: body.run, isAlive: body.isAlive })
+    if (body.run) apply({ run: body.run, isAlive: body.isAlive, custo: body.custo })
     return true
   } catch (err) {
     toast(`Sem conexão com o dashboard: ${err.message}`, true)
@@ -114,8 +116,9 @@ function connect() {
   }
 }
 
-function apply({ run, isAlive, agent }) {
+function apply({ run, isAlive, agent, custo }) {
   S.run = run
+  S.custo = custo ?? null
   S.isAlive = isAlive
   if (agent !== undefined) S.agent = agent
   render()
@@ -390,16 +393,56 @@ function renderProfiles(run) {
   )
 }
 
+/** US$ with 2 decimals, 4 under one cent. */
+const usd = n => `US$ ${n.toLocaleString('pt-BR', Math.abs(n) > 0 && Math.abs(n) < 0.01 ? { minimumFractionDigits: 4, maximumFractionDigits: 4 } : { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+
 function renderMix(run) {
   const steps = run.steps.filter(s => s.status !== 'skipped' && s.mode === 'agent')
   const weight = S.meta.tierWeight
+  const custo = S.custo
+  const real = custo && custo.total > 0 ? custo : null
+  // By real cost when there is one; otherwise the relative tier weight, as before.
   const by = Object.fromEntries(S.meta.models.map(m => [m, steps.filter(s => s.model === m)]))
-  const total = steps.reduce((n, s) => n + weight[s.model], 0) || 1
-  $('mix').replaceChildren(...S.meta.models.filter(m => by[m].length).map(m => el('span', { style: `width:${(by[m].reduce((n, s) => n + weight[s.model], 0) / total) * 100}%;background:${TIER_VAR[m]}`, title: m })))
+  const share = m => (real ? real.steps.filter(c => c.model === m).reduce((n, c) => n + (c.cost ?? 0), 0) : by[m].reduce((n, s) => n + weight[s.model], 0))
+  const total = S.meta.models.reduce((n, m) => n + share(m), 0) || 1
+  $('mix').replaceChildren(...S.meta.models.filter(m => share(m) > 0).map(m => el('span', { style: `width:${(share(m) / total) * 100}%;background:${TIER_VAR[m]}`, title: m })))
   $('mix-legend').replaceChildren(...S.meta.models.map(m => el('span', {}, el('i', { style: `background:${TIER_VAR[m]}` }), `${m} × ${by[m].length}`)))
-  const used = run.steps.reduce((n, s) => n + (s.usage ? s.usage.input + s.usage.output + s.usage.cacheRead + s.usage.cacheWrite : 0), 0)
-  const inline = run.steps.filter(s => s.mode === 'inline').length
-  $('tokens').textContent = `Peso relativo por tier (haiku 1 · sonnet 3 · opus 5), não preço.${inline ? ` ${inline} etapa(s) inline no modelo da sessão.` : ''}${used ? ` Tokens dos subagentes até agora: ${Math.round(used / 1000)}k.` : ''}`
+
+  const inline = custo ? custo.inline : run.steps.filter(s => s.mode === 'inline').length
+  const lines = []
+  if (custo && custo.steps.length) {
+    const priced = custo.steps.length - custo.unpriced
+    lines.push(
+      el('div', { class: 'cost-row' }, el('span', { class: 'cost-big' }, priced ? usd(custo.total) : 'sem preço'), el('span', { class: 'cost-tag' }, 'equivalente à API')),
+      custo.saving === null || !priced
+        ? el('div', { class: 'cost-row' }, el('span', {}, `Economia contra tudo em ${custo.strong}: ${priced ? `sem preço do ${custo.strong}` : 'sem preço nas etapas'}`))
+        : el('div', { class: 'cost-row' }, el('span', {}, `Economia contra tudo em ${custo.strong}: ${usd(custo.saving)}`), el('span', { class: 'cost-tag' }, 'estimativa')),
+    )
+    if (custo.unpriced) lines.push(el('div', { class: 'cost-note' }, `${custo.unpriced} etapa(s) sem preço, fora do total.`))
+    lines.push(
+      el(
+        'ul',
+        { class: 'cost-steps' },
+        custo.steps.map(c => el('li', {}, el('i', { style: `background:${TIER_VAR[c.model]}` }), el('span', { class: 'cost-id' }, c.id), el('span', { class: 'cost-val' }, c.cost === null ? 'sem preço' : usd(c.cost)), el('span', { class: 'cost-tok' }, `${Math.round(c.tokens / 1000)}k tok`))),
+      ),
+    )
+  } else {
+    lines.push(el('div', { class: 'cost-note' }, 'Sem tokens de subagentes ainda: o custo aparece conforme as etapas terminam.'))
+  }
+  if (inline) lines.push(el('div', { class: 'cost-note' }, `${inline} etapa(s) inline no modelo da sessão, fora da conta.`))
+  // The date travels with the cost (fresh on every push); meta is read once at load.
+  const hasPrices = custo ? custo.hasPrices : Boolean(S.meta.precos)
+  const when = custo ? custo.checkedAt : S.meta.precos?.conferidoEm
+  lines.push(
+    el(
+      'div',
+      { class: 'cost-note' },
+      !hasPrices
+        ? 'Sem tabela de preços na config (chave precos): só tokens.'
+        : `${when ? `Preços conferidos em ${when}.` : 'Preços sem data de conferência (precos.conferidoEm).'} Num plano por assento a fatura é fixa: o valor serve para comparar.`,
+    ),
+  )
+  $('tokens').replaceChildren(...lines)
 }
 
 function renderLog(run) {

@@ -5,7 +5,7 @@ import { readFileSync, statSync } from 'node:fs'
 import { dirname, extname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-import { EFFORTS, MODELS, PLAYBOOKS, PROFILES, ROLES, TIER_WEIGHT, defaultsFor } from '../core/run-core.ts'
+import { EFFORTS, MODELS, PLAYBOOKS, PROFILES, ROLES, TIER_WEIGHT, defaultsFor, runCost } from '../core/run-core.ts'
 import { HOME, listRuns, modAlive, paths, readAgent, readConfig, readRun, submit, writeJsonAtomic } from '../bin/lib/store.mjs'
 
 const DIR = dirname(fileURLToPath(import.meta.url))
@@ -47,15 +47,43 @@ function body(req) {
   })
 }
 
+/** Prices come only from the user's config (checked against the official page); null when absent or malformed. */
+function precos() {
+  const p = readConfig().precos
+  return p && typeof p === 'object' && !Array.isArray(p) ? p : null
+}
+
+const strongTier = () => {
+  const m = readConfig().models?.strong
+  return MODELS.includes(m) ? m : 'opus'
+}
+
+/** The run's cost plus the date its prices were checked, read with it so a config edit never leaves the label stale. */
+const custo = run => {
+  if (!run) return null
+  const p = precos()
+  const when = p?.conferidoEm
+  return { ...runCost(run, p, strongTier()), hasPrices: p !== null, checkedAt: typeof when === 'string' ? when : null }
+}
+
+/** Changes whenever the config does, so the stream resends the cost when the prices are edited. */
+function configStamp() {
+  try {
+    return statSync(join(HOME, 'config.json')).mtimeMs
+  } catch {
+    return 'none'
+  }
+}
+
 function meta() {
   const roles = Object.fromEntries(Object.entries(ROLES).map(([k, r]) => [k, { ...r, byProfile: Object.fromEntries(PROFILES.map(p => [p, defaultsFor(k, p)])) }]))
-  return { models: MODELS, efforts: EFFORTS, profiles: PROFILES, playbooks: PLAYBOOKS, roles, tierWeight: TIER_WEIGHT }
+  return { models: MODELS, efforts: EFFORTS, profiles: PROFILES, playbooks: PLAYBOOKS, roles, tierWeight: TIER_WEIGHT, precos: precos(), strong: strongTier() }
 }
 
 function snapshot(sid) {
   const run = readRun(sid)
   const agent = run?.agent ? readAgent(run.agent) : null
-  return { run, isAlive: modAlive(sid), agent: agent && { name: agent.name, repo: agent.repo } }
+  return { run, isAlive: modAlive(sid), agent: agent && { name: agent.name, repo: agent.repo }, custo: custo(run) }
 }
 
 function stream(req, res, sid) {
@@ -64,9 +92,9 @@ function stream(req, res, sid) {
   const send = () => {
     let stamp = ''
     try {
-      stamp = `${statSync(paths(sid).run).mtimeMs}:${modAlive(sid)}`
+      stamp = `${statSync(paths(sid).run).mtimeMs}:${modAlive(sid)}:${configStamp()}`
     } catch {
-      stamp = `none:${modAlive(sid)}`
+      stamp = `none:${modAlive(sid)}:${configStamp()}`
     }
     if (stamp === last) return
     last = stamp
@@ -118,7 +146,7 @@ const server = createServer(async (req, res) => {
         if (!readRun(sid)) return json(res, 404, { error: 'run não encontrada' })
         const { id: _id, by: _by, at: _at, ...clean } = cmd
         const r = await submit(sid, clean, { by: 'dashboard', waitMs: 4000 })
-        return json(res, r.ok ? 200 : 409, { ok: r.ok, error: r.error, run: r.run, isAlive: modAlive(sid) })
+        return json(res, r.ok ? 200 : 409, { ok: r.ok, error: r.error, run: r.run, isAlive: modAlive(sid), custo: custo(r.run) })
       }
     }
     json(res, 404, { error: 'não encontrado' })

@@ -1,7 +1,7 @@
 // The run's rules, shared by the mod, the CLI and the dashboard server.
 // Pure functions over plain data: no fs, no Node, no engine. Node 24 runs this
 // file as is (type stripping), so only erasable TypeScript goes here.
-import type { Applied, Command, Effort, Model, PlanInput, PlanStepInput, Profile, Run, RunStatus, Step, StepPatch, StepStatus } from '../types'
+import type { Applied, Command, Effort, Model, PlanInput, PlanStepInput, Profile, Run, RunStatus, Step, StepPatch, StepStatus, Usage } from '../types'
 
 export const MODELS: readonly Model[] = ['haiku', 'sonnet', 'opus']
 export const EFFORTS: readonly Effort[] = ['low', 'medium', 'high', 'xhigh', 'max']
@@ -496,6 +496,73 @@ export function inboxLines(text: string): string[] {
   if (lines.length && !text.endsWith('\n')) lines.pop()
   else if (lines.length && lines[lines.length - 1] === '') lines.pop()
   return lines
+}
+
+// ---------------------------------------------------------------- cost
+
+/** US$ per million tokens, as the user's config holds them (`precos.modelos[model]`). */
+export type Price = { entrada: number; saida: number; leituraCache: number; escritaCache: number }
+export type StepCost = { id: string; model: Model; tokens: number; cost: number | null }
+export type RunCost = {
+  /** Sum of the steps that have a price; 0 when none. */
+  total: number
+  steps: StepCost[]
+  /** Steps with usage but no usable price (counted in tokens, left out of the total). */
+  unpriced: number
+  /** Inline steps: they run in the session's model and carry no usage. */
+  inline: number
+  /** Money saved against running every priced step on the strong tier; null when that tier has no price. */
+  saving: number | null
+  strong: Model
+  /** Tokens of every step with usage (priced or not). */
+  tokens: number
+}
+
+const PRICE_KEYS = ['entrada', 'saida', 'leituraCache', 'escritaCache'] as const
+const isNum = (n: unknown): n is number => typeof n === 'number' && Number.isFinite(n) && n >= 0
+
+/** The usable price of a model, or null when the config lacks it or any field is not a number. */
+export function priceOf(precos: unknown, model: string): Price | null {
+  const p = (precos as { modelos?: Record<string, Record<string, unknown>> } | null | undefined)?.modelos?.[model]
+  if (!p || typeof p !== 'object') return null
+  return PRICE_KEYS.every(k => isNum(p[k])) ? (p as unknown as Price) : null
+}
+
+/** A usage field as a count: the session may omit one (the API leaves cache counters out), and NaN would poison every total. */
+const count = (n: unknown): number => (isNum(n) ? n : 0)
+
+export function usageTokens(u: Usage): number {
+  return count(u.input) + count(u.output) + count(u.cacheRead) + count(u.cacheWrite)
+}
+
+/** US$ of one usage at one price. */
+export function usageCost(u: Usage, p: Price): number {
+  return (count(u.input) * p.entrada + count(u.output) * p.saida + count(u.cacheRead) * p.leituraCache + count(u.cacheWrite) * p.escritaCache) / 1e6
+}
+
+/** Real cost of the run and the saving against running it all on `strong`. Pure: prices come from the caller. */
+export function runCost(run: Pick<Run, 'steps'>, precos: unknown, strong: Model = 'opus'): RunCost {
+  const strongPrice = priceOf(precos, strong)
+  const out: RunCost = { total: 0, steps: [], unpriced: 0, inline: 0, saving: strongPrice ? 0 : null, strong, tokens: 0 }
+  for (const s of run.steps) {
+    if (s.status === 'skipped') continue
+    if (s.mode === 'inline') {
+      out.inline++
+      continue
+    }
+    if (!s.usage || typeof s.usage !== 'object') continue
+    const p = priceOf(precos, s.model)
+    const cost = p ? usageCost(s.usage, p) : null
+    out.tokens += usageTokens(s.usage)
+    out.steps.push({ id: s.id, model: s.model, tokens: usageTokens(s.usage), cost })
+    if (cost === null) {
+      out.unpriced++
+      continue
+    }
+    out.total += cost
+    if (strongPrice && out.saving !== null) out.saving += usageCost(s.usage, strongPrice) - cost
+  }
+  return out
 }
 
 // ---------------------------------------------------------------- text

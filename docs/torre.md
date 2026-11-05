@@ -1,6 +1,6 @@
 # Torre de controle
 
-> Especificação. Nada daqui está implementado ainda. Autor: Carlos Henrique Moreira Gonçalves.
+> Especificação. Só a T4 (custo real na run do Ultron) está implementada; o resto ainda não. Autor: Carlos Henrique Moreira Gonçalves.
 
 ## O que é
 
@@ -114,6 +114,8 @@ Ao vivo por *server-sent events*, como o stream da run (`/api/runs/:sessão/stre
 
 O painel "Consumo" do dashboard deixa de mostrar só o peso relativo do tier e passa a mostrar o custo de cada
 etapa e da run, e a economia contra rodar tudo no tier forte. Mesma tabela de preços da T3.
+
+**Implementada** (5/11/2026): `runCost` em `core/run-core.ts`, preços do `config.json` via servidor, painel Consumo com custo, economia e lista por etapa.
 
 ### T5. Resumo em linguagem natural (opcional, desligado por padrão)
 
