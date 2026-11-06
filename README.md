@@ -1,6 +1,6 @@
 # Ultron Orchestrator
 
-**Orquestração de modelos por etapa para o Claude Code.** Com `/ultron <tarefa>`, a sessão vira o **Ultron**: ele classifica a tarefa, monta um fluxo de etapas em que cada uma tem o **modelo** (Haiku, Sonnet ou Opus) e o **effort** que de fato precisa, pede sua aprovação e só então executa, delegando cada etapa a um subagente. Você acompanha a jornada num painel lateral no terminal e num dashboard local, com um mini Ultron em pixel art andando de etapa em etapa até a bandeira.
+**Orquestração de modelos por etapa para o Claude Code.** Com `/ultron <tarefa>`, a sessão vira o **Ultron**: ele classifica a tarefa, monta um fluxo de etapas em que cada uma tem o **modelo** (Haiku, Sonnet ou Opus) e o **effort** que de fato precisa, pede sua aprovação e só então executa, delegando cada etapa a um subagente. Você acompanha a jornada num painel lateral no terminal e num dashboard local, com um mini Ultron em pixel art andando de etapa em etapa até a bandeira. O dashboard também reúne todas as sessões abertas do Claude Code, agrupadas por repositório, e deixa você iniciar um fluxo em qualquer uma delas.
 
 ![Jornada no dashboard](docs/dashboard.png)
 
@@ -17,13 +17,15 @@ O Ultron separa a tarefa em etapas e escolhe o par modelo/effort de cada uma. Na
 - **Gate de aprovação**: a aprovação vale para uma *revisão* do plano. Qualquer edição, feita no chat ou no dashboard, cria uma nova revisão e pede aprovação de novo.
 - **Garante o plano**: quando o Ultron chama um subagente de uma etapa, o mod aplica o modelo, o effort e o tipo de agente do plano. Se o plano não foi aprovado, se a run está pausada ou se uma dependência ainda não terminou, o mod nega a chamada.
 - **Dashboard interativo** (`http://127.0.0.1:4477`): edita o modelo, o effort, o papel, a onda e as dependências de cada etapa; adiciona, remove e reordena etapas; troca o perfil; aprova, pede mudanças, pausa e cancela. Tudo chega à sessão como mensagem.
-- **Painel lateral** no terminal: o Ultron em pixel art, a trilha de ondas e a lista de etapas. Só aparece na sessão que chamou `/ultron`.
+- **Dashboard de sessões**: todas as sessões abertas, agrupadas por repositório, com a branch e o ponto em que o fluxo está; as sessões encerradas em que o Ultron trabalhou; e uma coluna com os fluxos em andamento. Dá para iniciar uma tarefa numa sessão aberta ou reabrir uma encerrada com uma tarefa nova.
+- **Uma IA por repositório**: cada repositório git com sessão aberta ganha o nome e a cor de uma IA da Marvel (JARVIS, F.R.I.D.A.Y., Visão…). Sessões fora de um repositório git ficam no padrão, sem nome e com a cor neutra.
+- **Painel lateral** no terminal: o Ultron em pixel art, a IA do repositório, a trilha de ondas e a lista de etapas. Aparece em toda sessão interativa, com o Ultron esperando uma tarefa até haver um fluxo.
 - **Revisão de PR como QA sênior** (`/ultron revisar`): contexto, auditoria e testes em paralelo, depois validação adversarial dos achados e um comentário que só é publicado com o seu ok.
-- **Não interfere nas outras sessões**: a skill só roda quando você digita `/ultron` (o modelo não a chama sozinho) e o mod fica inerte até lá.
+- **Fluxo só quando você pede**: a skill só roda quando você digita `/ultron` ou inicia uma tarefa pelo dashboard (o modelo não a chama sozinho), e o plano sempre espera a sua aprovação. Nas outras sessões o mod só registra a presença e desenha o painel.
 
 ## Requisitos
 
-- **Claude Code** recente, com suporte a mods (plugins com hooks de função). Testado na 2.1.312.
+- **Claude Code** recente, com suporte a mods (plugins com hooks de função). Testado na 2.1.318.
 - **Node.js 22.18+** (recomendado 24) no `PATH`. A CLI e o dashboard não têm dependências.
 - **git** e **[GitHub CLI](https://cli.github.com)** (`gh auth login`), só para o fluxo de revisão de PR.
 - Windows, macOS ou Linux.
@@ -89,6 +91,26 @@ Para conferir a instalação, rode `claude plugin list`: `ultron@ultron-orchestr
 | `/ultron` | retoma a run em andamento do ponto em que parou |
 
 No chat, depois que o plano aparece, você pode responder `aprovar`, pedir mudanças ("troque o build para opus", "tire a etapa de docs") ou editar pelo dashboard.
+
+## Dashboard de sessões
+
+O mod registra toda sessão interativa do Claude Code (não as rodadas com `claude -p`) e mantém o dashboard de pé enquanto houver alguma aberta. Abra em `http://127.0.0.1:4477` ou com `/ultron dashboard`.
+
+![Sessões abertas agrupadas por repositório](docs/sessoes.png)
+
+- **Sessões**: as sessões abertas em cards, agrupadas por repositório, com o nome da sessão (o do `/rename` ou o título automático), a pasta, a branch e onde o fluxo está. O card leva à tela do fluxo. Numa sessão sem fluxo, **Definir fluxo** envia a tarefa para o terminal dela, onde roda como `/ultron <tarefa>`; o plano continua esperando a sua aprovação. Uma sessão com fluxo em andamento não recebe tarefa nova.
+- **Finalizadas**: as sessões encerradas em que o Ultron trabalhou. **Continuar com nova tarefa** abre um terminal na pasta da sessão com `claude --resume <id>` (Windows e macOS; no Linux o dashboard mostra o comando para você rodar), e a tarefa começa assim que a sessão volta.
+- **Em execução** (coluna lateral): as sessões abertas com fluxo não terminado (aguardando aprovação, aprovado, executando ou pausado).
+
+![Sessões encerradas](docs/finalizadas.png)
+
+**Sessões retomadas.** Uma sessão retomada pelo terminal volta a aparecer como aberta, seja com `claude --resume`, seja com `/resume` dentro de um Claude já aberto. Se ela tinha um fluxo sem terminar, o Ultron o retoma de onde parou. Depois de um `/clear`, a conversa nova também aparece como uma sessão aberta.
+
+**Uma IA da Marvel por repositório.** A IA vale só para sessões dentro de um repositório git. O repositório é identificado pelo `origin` (`owner/repo`) ou, sem `origin`, pelo nome da pasta raiz. Cada repositório com sessão aberta ganha o nome e a cor de uma IA (JARVIS, F.R.I.D.A.Y., E.D.I.T.H., Jocasta, Visão, Karen, H.O.M.E.R., AIDA, Veronica, Dum-E), mostrados num holograma animado. Todas as sessões do repositório usam o mesmo nome (`JARVIS · 2` quando há mais de uma). Quando a última sessão do repositório fecha, o nome volta para o sorteio, e da próxima vez o repositório ganha outro. Sessões fora de um repositório git ficam no padrão: sem nome, com a cor neutra, num grupo "Sem repositório". O painel do terminal mostra a IA da sessão em que está.
+
+**O Ultron.** No painel do terminal (12×16, estilo chibi) e no dashboard (32×32) ele muda de pose conforme o fluxo. Anda entre as ondas, ergue a garra enquanto os subagentes trabalham e cruza os braços esperando aprovação. Avaria quando algo falha e, no fim da jornada, para de pernas abertas, com a garra erguida e os olhos em brasa. As falas sarcásticas sobre o processo ficam em `core/quotes.ts`, são as mesmas no painel e no dashboard e trocam a cada 8s ou quando o fluxo anda.
+
+![Fim da jornada](docs/fim-da-jornada.png)
 
 ## O fluxo
 
@@ -204,10 +226,15 @@ skills/ultron/            a skill: o roteiro do orquestrador e seus playbooks (r
 hooks/register.tsx        o mod: ativação, painel lateral, garantia do plano, ponte com o dashboard
 core/run-core.ts          as regras da run (plano, revisões, gate, comandos); compartilhado
 bin/ultron.mjs            a CLI que a skill chama (node bin/ultron.mjs help)
-dashboard/                servidor local (server.mjs) e página (index.html, app.js, sprite.js)
+bin/lib/sessions.mjs      a lista de sessões do dashboard, as tarefas enviadas a elas e a reabertura de uma encerrada
+bin/lib/names.mjs         a IA da Marvel de cada repositório com sessão aberta
+core/quotes.ts            as falas do Ultron, as mesmas no painel e no dashboard
+dashboard/                servidor local (server.mjs) e página (index.html, app.js, sprite.js, holo.js)
 ```
 
-- **Ativação**: digitar `/ultron` (ou a primeira chamada da CLI) liga o mod naquela sessão, abre o painel e sobe o dashboard.
+- **Presença**: em toda sessão interativa o mod grava `~/.claude/ultron/sessions/<id>.json` (pasta, branch, repositório e um batimento a cada 3s; `endedAt` quando a sessão fecha), abre o painel e sobe o dashboard. Ele também segue a troca de sessão feita por `/resume` e `/clear` no mesmo processo. O servidor guarda as IAs atribuídas em `~/.claude/ultron/names.json`.
+- **Tarefas do dashboard**: o dashboard grava a tarefa em `sessions/<id>.task.json`, e o mod daquela sessão a roda como `/ultron <tarefa>` uma única vez.
+- **Ativação do fluxo**: digitar `/ultron`, receber uma tarefa do dashboard ou a primeira chamada da CLI liga o fluxo naquela sessão.
 - **Uma fonte da verdade**: `~/.claude/ultron/runs/<sessão>/run.json` só é escrito pelo mod. A CLI e o dashboard anexam comandos em `inbox.jsonl` e esperam a confirmação. Se a sessão não estiver mais aberta, a própria CLI ou o dashboard aplicam o comando.
 - **Tag das etapas**: um subagente com `description: "ultron:<id> …"` pertence à etapa `<id>`. O mod liga a chamada à etapa, aplica o plano, acompanha o início e o fim e registra o consumo de tokens.
 
@@ -217,10 +244,12 @@ dashboard/                servidor local (server.mjs) e página (index.html, app
 - Os comandos do dashboard exigem `POST` com `Origin` da própria página e `Content-Type: application/json`, então formulários de outros sites não conseguem enviá-los. O corpo é limitado a 256 KB.
 - O dashboard só aceita comandos de decisão (aprovar, editar, pausar…). Marcar etapas como feitas, gravar planos e concluir a run ficam com a sessão.
 - Nada é enviado para fora da sua máquina. O plugin não guarda tokens; os subagentes recebem a regra de não imprimir segredos, e o comentário de revisão é limpo de segredos e caminhos locais antes de você vê-lo.
-- O mod não registra ferramentas nem seções de prompt e fica inerte nas sessões que não chamaram `/ultron`.
+- O mod não registra ferramentas nem seções de prompt. Nas sessões sem fluxo ele só registra a presença e desenha o painel.
+- Uma tarefa enviada pelo dashboard é limpa (sem caracteres de controle, até 4.000 caracteres) e roda como `/ultron <tarefa>`, então o plano dela também espera a sua aprovação.
+- Para reabrir uma sessão encerrada, a pasta e o id chegam ao terminal pelo ambiente, nunca por uma linha de comando montada. Uma pasta com caracteres que o terminal interpretaria é recusada.
 - As edições de etapa vindas do dashboard só alteram os campos editáveis (título, papel, execução, tipo de agente, modelo, effort, onda e dependências), com tipos validados. O nome de um repositório é validado antes de virar caminho de arquivo.
 - **Atenção ao agente do repositório**: o `## Contexto do repo` é escrito por subagentes a partir do código e das PRs, e entra no prompt das próximas revisões. Os subagentes são instruídos a tratar o código da PR como dado e não como instrução, mas, como em qualquer agente que lê conteúdo de terceiros, vale abrir esse arquivo de vez em quando e conferir o que está lá.
-- O servidor se desliga depois de 30 minutos sem uso, desde que nenhuma sessão esteja com o Ultron ativo.
+- O servidor se desliga depois de 30 minutos sem uso, desde que não haja nenhuma sessão aberta.
 
 ## Desenvolvimento
 

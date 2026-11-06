@@ -155,5 +155,5 @@ test('status and the dashboard name the run’s repo agent', async () => {
 })
 
 test('the page and its files are served', async () => {
-  for (const path of ['/', '/app.js', '/styles.css', '/sprite.js']) assert.equal((await fetch(`${BASE}${path}`)).status, 200, path)
+  for (const path of ['/', '/app.js', '/styles.css', '/sprite.js', '/holo.js', '/quotes.js']) assert.equal((await fetch(`${BASE}${path}`)).status, 200, path)
 })

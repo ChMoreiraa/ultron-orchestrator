@@ -1,24 +1,112 @@
 // Dashboard local do Ultron: http://127.0.0.1:<porta>. Sem dependências.
 // Lê run.json e só escreve na inbox (comandos), nunca no run.json direto.
 import { createServer } from 'node:http'
+import { stripTypeScriptTypes } from 'node:module'
 import { readFileSync, statSync } from 'node:fs'
 import { dirname, extname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 import { EFFORTS, MODELS, PLAYBOOKS, PROFILES, ROLES, TIER_WEIGHT, defaultsFor } from '../core/run-core.ts'
-import { HOME, listRuns, modAlive, paths, readAgent, readConfig, readRun, submit, writeJsonAtomic } from '../bin/lib/store.mjs'
+import { HOME, listRuns, modAlive, paths, readAgent, readConfig, readJson, readRun, submit, writeJsonAtomic } from '../bin/lib/store.mjs'
+import { cleanTask, isBusy, listSessions, openInTerminal, queueTask, readSession, taskFile } from '../bin/lib/sessions.mjs'
 
 const DIR = dirname(fileURLToPath(import.meta.url))
 const PORT = Number(process.env.ULTRON_PORT) || Number(readConfig().port) || 4477
 const IDLE_MS = 30 * 60_000
-const STATIC = { '/': 'index.html', '/app.js': 'app.js', '/styles.css': 'styles.css', '/sprite.js': 'sprite.js' }
+const STATIC = { '/': 'index.html', '/app.js': 'app.js', '/styles.css': 'styles.css', '/sprite.js': 'sprite.js', '/holo.js': 'holo.js' }
+/** Ultron's lines live in core/ for the mod too; the browser gets them with the types stripped. */
+const QUOTES = (() => {
+  try {
+    return stripTypeScriptTypes(readFileSync(join(DIR, '..', 'core', 'quotes.ts'), 'utf8'))
+  } catch (err) {
+    return `export const LINES = {}; export const LINE_MS = 8000; export const momentOf = () => 'none'; export const lineFor = () => ''; console.warn(${JSON.stringify(String(err))})`
+  }
+})()
 const TYPES = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8' }
 /** What the dashboard may send; the rest (step, agent-*, plan, finish) is the session's. */
 const ALLOWED = new Set(['approve', 'reject', 'pause', 'resume', 'cancel', 'set-profile', 'edit-step', 'add-step', 'remove-step', 'move-step'])
 const SESSION = /^[\w-]{1,80}$/
+const SESSIONS_EVERY_MS = 1500
 
 let lastSeen = Date.now()
 const streams = new Set()
+
+// ---------------------------------------------------------------- the sessions list, shared by every open tab
+
+let sessions = { at: 0, json: '[]', list: [] }
+const sessionStreams = new Set()
+
+function refreshSessions() {
+  const list = listSessions()
+  const text = JSON.stringify(list)
+  const isChanged = text !== sessions.json
+  sessions = { at: Date.now(), json: text, list }
+  if (isChanged) for (const res of sessionStreams) res.write(`event: sessions\ndata: ${text}\n\n`)
+}
+
+const currentSessions = () => {
+  if (Date.now() - sessions.at > SESSIONS_EVERY_MS) refreshSessions()
+  return sessions.list
+}
+
+setInterval(() => {
+  if (sessionStreams.size) refreshSessions()
+}, SESSIONS_EVERY_MS).unref()
+
+function streamSessions(req, res) {
+  res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-store', connection: 'keep-alive' })
+  currentSessions()
+  res.write(`event: sessions\ndata: ${sessions.json}\n\n`)
+  const ping = setInterval(() => res.write(': ping\n\n'), 15_000)
+  sessionStreams.add(res)
+  req.on('close', () => {
+    clearInterval(ping)
+    sessionStreams.delete(res)
+    lastSeen = Date.now()
+  })
+}
+
+async function readBody(req) {
+  try {
+    return JSON.parse(await body(req))
+  } catch {
+    return null
+  }
+}
+
+/** A task from the dashboard: queued for the session's mod, which runs `/ultron <task>` there (the plan still waits for approval). */
+async function postTask(req, res, sid) {
+  const input = await readBody(req)
+  if (!input) return json(res, 400, { error: 'JSON inválido' })
+  const card = currentSessions().find(c => c.sessionId === sid) ?? listSessions().find(c => c.sessionId === sid)
+  if (!card) return json(res, 404, { error: 'sessão não encontrada' })
+  if (input.cancel === true) {
+    const task = readJson(taskFile(sid), null)
+    if (task && !task.takenAt) writeJsonAtomic(taskFile(sid), { ...task, takenAt: Date.now(), isCancelled: true })
+    refreshSessions()
+    return json(res, 200, { ok: true })
+  }
+  if (isBusy(card)) return json(res, 409, { error: 'esta sessão já tem um fluxo em andamento; termine ou cancele antes de iniciar outro' })
+  const task = cleanTask(input.prompt)
+  if (task.error) return json(res, 400, { error: task.error })
+  queueTask(sid, task.text)
+  let opened = null
+  if (!card.isAlive && input.open === true) {
+    const info = readSession(sid)
+    opened = openInTerminal(sid, info?.cwd)
+  }
+  refreshSessions()
+  if (opened?.error) return json(res, 200, { ok: true, mode: 'queued', warning: `A tarefa ficou na fila, mas o terminal não abriu: ${opened.error}` })
+  return json(res, 200, { ok: true, mode: card.isAlive ? 'sent' : opened ? 'opened' : 'queued' })
+}
+
+function postOpen(res, sid) {
+  const info = readSession(sid)
+  const card = currentSessions().find(c => c.sessionId === sid)
+  if (card?.isAlive) return json(res, 409, { error: 'a sessão já está aberta num terminal' })
+  const r = openInTerminal(sid, info?.cwd)
+  return r.error ? json(res, 409, { error: r.error }) : json(res, 200, { ok: true })
+}
 
 const json = (res, status, body) => {
   res.writeHead(status, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' })
@@ -97,9 +185,22 @@ const server = createServer(async (req, res) => {
       res.writeHead(200, { 'content-type': TYPES[extname(file)], 'cache-control': 'no-store' })
       return res.end(readFileSync(file))
     }
+    if (req.method === 'GET' && path === '/quotes.js') {
+      res.writeHead(200, { 'content-type': TYPES['.js'], 'cache-control': 'no-store' })
+      return res.end(QUOTES)
+    }
     if (req.method === 'GET' && path === '/api/health') return json(res, 200, { app: 'ultron', pid: process.pid, port: PORT })
     if (req.method === 'GET' && path === '/api/meta') return json(res, 200, meta())
     if (req.method === 'GET' && path === '/api/runs') return json(res, 200, { runs: listRuns() })
+    if (req.method === 'GET' && path === '/api/sessions') return json(res, 200, { sessions: currentSessions() })
+    if (req.method === 'GET' && path === '/api/sessions/stream') return streamSessions(req, res)
+    const ms = path.match(/^\/api\/sessions\/([^/]+)\/(task|open)$/)
+    if (ms && req.method === 'POST') {
+      const sid = decodeURIComponent(ms[1])
+      if (!SESSION.test(sid)) return json(res, 400, { error: 'sessão inválida' })
+      if (!isTrusted(req)) return json(res, 403, { error: 'origem não permitida' })
+      return ms[2] === 'task' ? postTask(req, res, sid) : postOpen(res, sid)
+    }
     const m = path.match(/^\/api\/runs\/([^/]+)(\/stream|\/commands)?$/)
     if (m) {
       const sid = decodeURIComponent(m[1])
@@ -144,8 +245,8 @@ const server6 = createServer((req, res) => server.emit('request', req, res))
 server6.on('error', () => {})
 server6.listen(PORT, '::1')
 
-// Goes away by itself once nobody has looked for a while and no session runs /ultron.
+// Goes away by itself once nobody has looked for a while and no Claude Code session is open.
 setInterval(() => {
-  const isQuiet = streams.size === 0 && Date.now() - lastSeen > IDLE_MS
-  if (isQuiet && !listRuns().some(r => r.isAlive)) process.exit(0)
+  const isQuiet = streams.size === 0 && sessionStreams.size === 0 && Date.now() - lastSeen > IDLE_MS
+  if (isQuiet && !listRuns().some(r => r.isAlive) && !listSessions().some(s => s.isAlive)) process.exit(0)
 }, 60_000).unref()
