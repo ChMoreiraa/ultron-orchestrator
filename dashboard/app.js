@@ -693,6 +693,29 @@ function connectAgentes() {
   }
 }
 
+// O navegador abre no máximo 6 conexões por endereço, e cada aba do dashboard segura duas ao vivo
+// (jornada e torre). Com três abas abertas, a quarta ficava na fila e não carregava. Aba escondida
+// solta as duas e reconecta quando volta para a frente.
+function pauseLive() {
+  source?.close()
+  source = null
+  AG.source?.close()
+  AG.source = null
+  stopPolling()
+}
+
+function resumeLive() {
+  if (!source || source.readyState === EventSource.CLOSED) connect()
+  if (!AG.source || AG.source.readyState === EventSource.CLOSED) connectAgentes()
+  loadRuns()
+}
+
+document.addEventListener('visibilitychange', () => (document.hidden ? pauseLive() : resumeLive()))
+addEventListener('pagehide', pauseLive)
+addEventListener('pageshow', e => {
+  if (e.persisted && !document.hidden) resumeLive()
+})
+
 setInterval(renderAge, 1000)
 
 // ---- rota: `#agente=<id>` abre o perfil; sem hash, a jornada
@@ -836,7 +859,8 @@ async function start() {
   render()
   applyRoute()
   connectAgentes()
-  setInterval(loadRuns, 10_000)
+  if (document.hidden) pauseLive() // aberta em segundo plano: conecta só quando for vista
+  setInterval(() => document.hidden || loadRuns(), 10_000)
   requestAnimationFrame(frame)
 }
 
