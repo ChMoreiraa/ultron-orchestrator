@@ -161,7 +161,7 @@ async function activate($: EngineInterface) {
 
 const dashboardUrl = (sessionId: string) => `http://127.0.0.1:${port}/?session=${encodeURIComponent(sessionId)}`
 
-const SPRITE_W = 12
+const SPRITE_W = 16
 
 /** Where the sprite should stand on a trail `width` columns wide. */
 function targetColumn(run: Run, width: number): number {

@@ -1,6 +1,7 @@
-// Ultron for the terminal, after the comics: silver chrome, red eyes and
-// mouth, domed head with fins and a ridge. 12×16 pixels drawn as 8 rows of
-// half blocks ('▀': top pixel in the foreground, bottom in the background).
+// Ultron for the terminal, after the comics: silver chrome lit from the left,
+// a domed head with a bright ridge and side fins, angry slanted red eyes, a
+// toothed red grin and a red core on the chest. 16×20 pixels drawn as 10 rows
+// of half blocks ('▀': top pixel in the foreground, bottom in the background).
 export type Pose = 'idle' | 'walk' | 'work' | 'win' | 'fail' | 'wait'
 
 export const PALETTE: Record<string, string> = {
@@ -11,14 +12,13 @@ export const PALETTE: Record<string, string> = {
   L: '#cdd4de', // prata clara
   H: '#f4f7fb', // brilho
   R: '#e3241c', // vermelho
-  r: '#7a100c', // dentes
-  E: '#ffb3a0', // núcleo do olho
-  G: '#4b4b52', // olho apagado
-  F: '#ff8c2a', // propulsão
-  Y: '#ffe27a', // núcleo da propulsão
+  r: '#7a100c', // vermelho escuro (dentes, base do núcleo)
+  E: '#ffd0c0', // núcleo do olho e do peito
+  G: '#4b4b52', // apagado
+  Y: '#ffe27a', // olho em brasa
 }
 
-const W = 12
+const W = 16
 
 /** Sets single pixels over a copy of the rows: [y, x, colour]. */
 function put(rows: string[], points: [number, number, string][]): string[] {
@@ -27,74 +27,125 @@ function put(rows: string[], points: [number, number, string][]): string[] {
   return out.map(r => r.join(''))
 }
 
-const mirror = (points: [number, number, string][]): [number, number, string][] => points.flatMap(([y, x, c]) => [[y, x, c], [y, W - 1 - x, c]] as [number, number, string][])
-
-// Chibi Ultron, after a pixel-art reference: a big domed head with a ridge,
-// side fins, red slanted eyes, red cheek lines and a glowing mouth, over a
-// compact armoured body with red marks on the chest and a segmented belly.
-const BASE = [
-  '...KKKKKK...',
-  '..KLRMMRLK..',
-  'K.KLLRRLLK.K',
-  'KKLLMDDMLLKK',
-  'K.KERMMREK.K',
-  'K.KMRLLRMK.K',
-  '.KKRDMMDRKK.',
-  '..KDRRRRDK..',
-  '.KLLKMMKLLK.',
-  'KLMDDLLDDMLK',
-  'KMKRRMMRRKMK',
-  'KLKMRDDRMKLK',
-  'KMKDMDDMDKMK',
-  'KKKKDMMDKKKK',
-  '..KDMKKMDK..',
-  '.KKKK..KKKK.',
+// The head: a dome with a bright ridge down the middle, fins on both sides,
+// eyes that slant down to the nose, a toothed grin narrowing to the chin.
+const HEAD = [
+  '......KKKK......',
+  '....KKLHHLKK....',
+  '...KLMLHHLMNK...',
+  '..KLMMLHHLMMNK..',
+  '..KMMMMLLMMMNK..',
+  '.KNKDDMMMMDDKNK.',
+  '.KNKREDMMDERKNK.',
+  '.KNKDRRDDRRDKNK.',
+  '..KMMDDDDDDNNK..',
+  '..KMDRrRrRrDNK..',
+  '...KMDRRRRDNK...',
+  '...KKKKDDKKKK...',
 ]
 
-const withLegs = (legs: [string, string]) => [...BASE.slice(0, 14), ...legs]
+// The body on a fixed grid: arm (cols 1-2), outline, chest (cols 4-11), outline, arm (cols 13-14).
+const LEFT_ARM = ['.KLK', 'KLMK', 'KMNK', 'KLNK', 'KHLK']
+const RIGHT_ARM = ['KNK.', 'KMDK', 'KNDK', 'KNDK', 'KLMK']
+const CHEST = ['MLLMMMNN', 'LMDRRDMN', 'LMRERRMN', 'MMDrrDND', 'DMMMMNND']
+const BODY = CHEST.map((c, i) => LEFT_ARM[i] + c + RIGHT_ARM[i])
+const HIPS = '.KK.KDNKKNDK.KK.'
 
-const IDLE = BASE
+const LEGS = {
+  stand: ['...KDMK..KNDK...', '..KKKKK..KKKKK..'],
+  stride: ['..KDMK....KNDK..', '.KKKKK....KKKKK.'],
+  together: ['....KDMKKNDK....', '...KKKKKKKKKK...'],
+  tap: ['...KDMK..KKKKK..', '..KKKKK.........'],
+}
 
-/** The right arm raised high, as in the comics. */
-const ARM_UP: [number, number, string][] = [
-  [10, 10, '.'], [10, 11, '.'], [11, 10, '.'], [11, 11, '.'], [12, 10, '.'], [12, 11, '.'], [13, 10, '.'], [13, 11, '.'],
-  [10, 9, 'K'], [11, 9, 'K'], [12, 9, 'K'], [13, 9, 'K'],
-  [8, 10, 'L'], [8, 11, 'K'], [7, 10, 'M'], [7, 11, 'L'], [6, 10, 'M'], [6, 11, 'L'], [5, 10, 'M'], [5, 11, 'L'], [4, 10, 'M'], [4, 11, 'L'], [3, 10, 'K'], [3, 11, 'L'],
+const figure = (legs: string[], body = BODY, hips = HIPS) => [...HEAD, ...body, hips, ...legs]
+
+const IDLE = figure(LEGS.stand)
+
+/** The right arm thrown up beside the head, claw first, as in the comics. */
+function armUp(rows: string[], isOpen: boolean): string[] {
+  const out = rows.map(r => r.split(''))
+  const set = (y: number, x: number, c: string) => {
+    if (out[y] && x >= 0 && x < W) out[y]![x] = c
+  }
+  // The hanging arm goes; the chest keeps its outline.
+  for (let y = 13; y <= 16; y++) {
+    set(y, 12, 'K')
+    for (let x = 13; x < W; x++) set(y, x, '.')
+  }
+  for (let x = 12; x < W; x++) set(17, x, '.')
+  // Upper arm and forearm, lit on the left; the shoulder joins the chest.
+  for (let y = 3; y <= 12; y++) {
+    set(y, 13, 'K')
+    set(y, 14, y === 8 ? 'M' : 'L')
+    set(y, 15, y === 8 ? 'N' : 'M')
+  }
+  set(11, 12, 'K')
+  set(12, 12, 'K')
+  set(12, 13, 'M')
+  set(3, 14, 'H')
+  if (isOpen) {
+    set(2, 13, 'L')
+    set(2, 14, 'K')
+    set(2, 15, 'L')
+    set(1, 13, 'H')
+    set(1, 15, 'H')
+  } else {
+    set(1, 13, 'K')
+    set(1, 14, 'K')
+    set(1, 15, 'K')
+    set(2, 13, 'K')
+    set(2, 14, 'H')
+    set(2, 15, 'L')
+  }
+  return out.map(r => r.join(''))
+}
+
+/** Arms crossed over the chest: waiting on a person. The core still shows above them. */
+const CROSSED_BODY = [
+  '.KLK' + CHEST[0] + 'KNK.',
+  'KLMK' + CHEST[1] + 'KMDK',
+  'KMLLLLLLLLLLLMDK',
+  '.KMMHMMMMMMHMNK.',
+  '..KKDMMMMNNDKK..',
 ]
-const CLAW = put(IDLE, ARM_UP)
-const CLAW_SHUT = put(CLAW, [[2, 10, 'L'], [2, 11, 'H']])
-const CLAW_OPEN = put(CLAW, [[2, 10, 'H'], [1, 10, 'L'], [1, 11, 'H'], [2, 11, 'L']])
+const CROSSED_HIPS = '....KDNKKNDK....'
 
-/** Arms crossed: waiting on a person. */
-const CROSSED = [...BASE.slice(0, 10), 'KMLLLLLLLLMK', '.KMMHMMHMMK.', '..KDMDDMDK..', '..KKDMMDKK..', ...BASE.slice(14)]
-const TAP = [...CROSSED.slice(0, 14), '..KDMKK.....', '.KKKK..KDMK.']
+/** Eyes ablaze: the glow fills the slant. */
+const BLAZE: [number, number, string][] = [
+  [6, 4, 'Y'], [6, 5, 'H'], [6, 10, 'H'], [6, 11, 'Y'],
+  [7, 5, 'Y'], [7, 6, 'R'], [7, 9, 'R'], [7, 10, 'Y'],
+  [14, 7, 'H'],
+]
 
-/** The closing stance from the card: legs apart, one claw thrown up, eyes ablaze. */
-const STANCE = [...CLAW.slice(0, 14), '.KDMK..KMDK.', 'KKKK....KKKK']
-const STANCE_A = put(STANCE, [[2, 10, 'L'], [1, 11, 'H'], [2, 11, 'L']])
-const STANCE_B = put(STANCE, [[2, 10, 'H'], [1, 10, 'L'], [1, 11, 'H'], [4, 3, 'Y'], [4, 8, 'Y'], [7, 4, 'E'], [7, 7, 'E']])
-
-const FAIL = put(IDLE, [[1, 4, 'G'], [1, 7, 'G'], [2, 5, 'G'], [2, 6, 'G'], [4, 3, 'G'], [4, 4, 'G'], [4, 7, 'G'], [4, 8, 'G'], [5, 4, 'G'], [5, 7, 'G'], [6, 3, 'G'], [6, 8, 'G'], [7, 4, 'G'], [7, 5, 'D'], [7, 6, 'D'], [7, 7, 'G'], [10, 3, 'G'], [10, 4, 'G'], [10, 7, 'G'], [10, 8, 'G'], [11, 4, 'G'], [11, 7, 'G']])
-
+/** Switched off: grey eyes, a dark grin and a dead core. */
+const FAIL = IDLE.map((r, y) => {
+  if (y === 6 || y === 7) return r.replace(/[RE]/g, 'G')
+  if (y === 9 || y === 10) return r.replace(/R/g, 'D').replace(/r/g, 'K')
+  if (y >= 13 && y <= 15) return r.replace(/[RE]/g, 'G').replace(/r/g, 'D')
+  return r
+})
 export const ART = {
   palette: PALETTE,
   frames: {
     idle: IDLE,
-    walkA: withLegs(['.KDMK..KMDK.', 'KKKK....KKKK']),
-    walkB: withLegs(['...KDMMDK...', '..KKKKKKKK..']),
-    workA: CLAW_SHUT,
-    workB: CLAW_OPEN,
-    waitA: CROSSED,
-    waitB: TAP,
-    winA: STANCE_A,
-    winB: STANCE_B,
+    walkA: figure(LEGS.stride),
+    walkB: figure(LEGS.together),
+    workA: armUp(IDLE, false),
+    workB: armUp(IDLE, true),
+    waitA: figure(LEGS.stand, CROSSED_BODY, CROSSED_HIPS),
+    waitB: figure(LEGS.tap, CROSSED_BODY, CROSSED_HIPS),
+    winA: armUp(figure(LEGS.stride), true),
+    winB: put(armUp(figure(LEGS.stride), false), BLAZE),
     fail: FAIL,
   } as Record<string, string[]>,
 }
 
 const BLINK_EVERY = 9
+/** The rows that hold the eyes. */
+const EYES = [6, 7]
 
-/** The pose's 16 pixel rows at this frame. */
+/** The pose's 20 pixel rows at this frame. */
 export function pixels(pose: Pose, frame: number): string[] {
   const odd = frame % 2 === 1
   const f = ART.frames
@@ -118,10 +169,9 @@ export function pixels(pose: Pose, frame: number): string[] {
     default:
       rows = f.idle!
   }
-  if (pose !== 'fail' && frame % BLINK_EVERY === BLINK_EVERY - 1) rows = rows.map((r, y) => (y === 4 || y === 5 ? r.replace(/[RE]/g, 'M') : r))
+  if (pose !== 'fail' && frame % BLINK_EVERY === BLINK_EVERY - 1) rows = rows.map((r, y) => (EYES.includes(y) ? r.replace(/[REY]/g, 'D') : r))
   return rows
 }
-
 export type Cell = { ch: string; fg?: string; bg?: string }
 
 /** Pixel rows folded into text rows of half-block cells, runs of one style merged. */
