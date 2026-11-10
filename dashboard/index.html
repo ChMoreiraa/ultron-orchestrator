@@ -10,147 +10,226 @@
   </head>
   <body>
     <header class="topbar">
-      <div class="brand">
-        <canvas id="logo" class="pixel" width="24" height="24" aria-hidden="true"></canvas>
+      <a class="brand" href="#/sessoes">
+        <canvas id="logo" class="pixel logo-head" width="17" height="12" aria-hidden="true"></canvas>
         <span class="brand-name">ULTRON</span>
         <span class="brand-sub">orquestrador de modelos</span>
-      </div>
-      <div id="top-right" class="top-right">
-        <select id="session" aria-label="Sessão"></select>
+      </a>
+      <nav class="tabs" aria-label="Seções">
+        <a href="#/sessoes" id="tab-sessions" class="tab">Sessões <span id="count-alive" class="count">0</span></a>
+        <a href="#/finalizadas" id="tab-finished" class="tab">Finalizadas <span id="count-done" class="count">0</span></a>
+        <a href="#/agentes" id="tab-agentes" class="tab">Agentes <span id="count-agentes" class="count">0</span></a>
+      </nav>
+      <div class="top-right">
         <span id="live" class="pill pill-muted" title="Conexão com o dashboard">● offline</span>
-        <span id="alive" class="pill pill-muted" title="A sessão do Claude Code que roda esta jornada">sessão ?</span>
       </div>
     </header>
 
-    <main id="app">
-      <div class="torre">
-      <aside id="lista" class="lista" aria-label="Agentes">
-        <div class="lista-head">
-          <h2>Agentes</h2>
-          <span id="agentes-live" class="pill pill-muted">● offline</span>
-        </div>
-        <div id="agentes-warn" class="agentes-warn" role="alert" hidden></div>
-        <div id="agentes-list" class="lista-rows"></div>
-        <p id="agentes-empty" class="muted small lista-vazia" hidden>Nenhum agente ainda. Um agente aparece aqui quando escreve <code>~/.claude/agentes/&lt;id&gt;.json</code>.</p>
-      </aside>
-      <div class="torre-main">
-      <section id="perfil" class="panel perfil" hidden></section>
-      <div id="view-jornada">
-      <section id="empty" class="panel empty" hidden>
-        <canvas id="empty-sprite" class="pixel big" width="24" height="24" aria-hidden="true"></canvas>
-        <h2>Nenhuma jornada ainda</h2>
-        <p>Chame <code>/ultron &lt;tarefa&gt;</code> numa sessão do Claude Code para o Ultron montar o fluxo. Ele aparece aqui para você aprovar.</p>
-      </section>
-
-      <div id="content" hidden>
-        <section id="approval" class="banner" hidden>
-          <div class="banner-text">
-            <strong>O Ultron aguarda sua aprovação</strong>
-            <span id="approval-detail"></span>
+    <div class="layout">
+      <main id="app">
+        <!-- Sessões: every Claude Code session open now -->
+        <section id="view-sessions" class="view" hidden>
+          <div class="view-head">
+            <h1>Sessões ativas</h1>
+            <span id="sessions-caption" class="muted"></span>
           </div>
-          <div class="banner-actions">
-            <button id="approve" class="btn btn-primary">Aprovar fluxo</button>
-            <button id="ask-changes" class="btn">Pedir mudanças</button>
+          <div id="sessions-grid" class="session-grid"></div>
+          <div id="sessions-empty" class="panel empty" hidden>
+            <canvas id="empty-sessions-sprite" class="pixel big" width="24" height="24" aria-hidden="true"></canvas>
+            <h2>Nenhuma sessão aberta</h2>
+            <p>Abra o Claude Code num terminal: cada sessão aparece aqui sozinha, e dá para iniciar uma tarefa do Ultron nela por este painel.</p>
           </div>
-          <form id="reject-form" class="reject-form" hidden>
-            <textarea id="reject-reason" rows="2" placeholder="O que o Ultron deve mudar no plano?"></textarea>
-            <div class="row-end">
-              <button type="button" id="reject-cancel" class="btn btn-ghost">Voltar</button>
-              <button type="submit" class="btn btn-danger">Enviar pedido</button>
-            </div>
-          </form>
         </section>
 
-        <section class="panel hero">
-          <div class="hero-main">
-            <div class="eyebrow">Objetivo</div>
-            <h1 id="goal"></h1>
-            <p id="rationale" class="muted"></p>
-            <div class="chips" id="chips"></div>
+        <!-- Finalizadas: closed sessions the Ultron worked in -->
+        <section id="view-finished" class="view" hidden>
+          <div class="view-head">
+            <h1>Finalizadas</h1>
+            <span id="finished-caption" class="muted"></span>
           </div>
-          <div class="hero-side">
-            <div class="stat"><span class="stat-label">Status</span><span id="status" class="status-badge"></span></div>
-            <div class="stat"><span class="stat-label">Progresso</span><span id="progress" class="stat-value"></span></div>
-            <div class="stat"><span class="stat-label">Revisão</span><span id="revision" class="stat-value"></span></div>
-            <div class="hero-actions">
-              <button id="pause" class="btn">Pausar</button>
-              <button id="cancel" class="btn btn-danger-ghost">Cancelar</button>
+          <div id="finished-grid" class="session-grid"></div>
+          <div id="finished-empty" class="panel empty" hidden>
+            <h2>Nada por aqui ainda</h2>
+            <p>Sessões encerradas em que o Ultron trabalhou aparecem aqui, prontas para continuar com uma nova tarefa.</p>
+          </div>
+        </section>
+
+        <!-- Agentes: a torre, lista estilo WhatsApp + perfil -->
+        <section id="view-agentes" class="view" hidden>
+          <div class="torre">
+            <aside id="lista" class="lista" aria-label="Agentes">
+              <div class="lista-head">
+                <h2>Agentes</h2>
+                <span id="agentes-live" class="pill pill-muted">● offline</span>
+              </div>
+              <div id="agentes-warn" class="agentes-warn" role="alert" hidden></div>
+              <div id="agentes-list" class="lista-rows"></div>
+              <p id="agentes-empty" class="muted small lista-vazia" hidden>Nenhum agente ainda. Um agente aparece aqui quando escreve <code>~/.claude/agentes/&lt;id&gt;.json</code>.</p>
+            </aside>
+            <div class="torre-main">
+              <section id="perfil" class="panel perfil"></section>
             </div>
           </div>
         </section>
 
-        <section class="panel">
-          <div class="section-head">
-            <h2>Jornada</h2>
-            <span id="journey-caption" class="muted"></span>
-          </div>
-          <div class="journey-scroll">
-            <div id="journey" class="journey">
-              <div class="road"></div>
-              <div id="road-lit" class="road road-lit"></div>
-              <div id="stations" class="stations"></div>
-              <div id="walker" class="walker"><canvas id="ultron" class="pixel" width="24" height="24"></canvas><span id="walker-say" class="say"></span></div>
+        <!-- Fluxo: one session's journey -->
+        <section id="view-flow" class="view" hidden>
+          <div class="flow-head">
+            <a id="back" class="back" href="#/sessoes">← Sessões</a>
+            <canvas id="flow-holo" class="holo holo-lg" data-holo="#8a93a6" data-dim="1" aria-hidden="true"></canvas>
+            <div class="flow-title">
+              <div id="session-ai" class="session-ai" hidden></div>
+              <h1 id="session-title"></h1>
+              <div id="session-meta" class="session-meta"></div>
             </div>
+            <span id="alive" class="pill pill-muted">sessão ?</span>
           </div>
-        </section>
 
-        <div class="grid">
-          <section class="panel">
-            <div class="section-head">
-              <h2>Fluxo de agentes</h2>
-              <span class="muted">Edite modelo, effort e etapas; cada mudança pede nova aprovação.</span>
+          <section id="start" class="panel start" hidden>
+            <div class="start-head">
+              <canvas id="start-sprite" class="pixel" width="24" height="24" aria-hidden="true"></canvas>
+              <div>
+                <h2 id="start-title">Iniciar uma tarefa nesta sessão</h2>
+                <p id="start-hint" class="muted small"></p>
+              </div>
             </div>
-            <div class="table-wrap">
-              <table class="flow">
-                <thead>
-                  <tr>
-                    <th></th>
-                    <th>Etapa</th>
-                    <th>Papel</th>
-                    <th>Execução</th>
-                    <th>Modelo</th>
-                    <th>Effort</th>
-                    <th>Onda</th>
-                    <th>Depende de</th>
-                    <th>Status</th>
-                    <th></th>
-                  </tr>
-                </thead>
-                <tbody id="flow-body"></tbody>
-              </table>
+            <div id="start-pending" class="pending" hidden>
+              <span id="start-pending-text"></span>
+              <button id="start-pending-cancel" class="btn btn-ghost" type="button">Tirar da fila</button>
             </div>
-            <form id="add-form" class="add-form">
-              <input id="add-id" placeholder="id (ex.: docs)" pattern="[a-z0-9][a-z0-9-]{0,31}" required />
-              <input id="add-title" placeholder="Título da nova etapa" required />
-              <select id="add-role"></select>
-              <input id="add-wave" type="number" min="1" value="1" aria-label="Onda" />
-              <button class="btn" type="submit">+ Etapa</button>
+            <form id="start-form" class="start-form">
+              <textarea id="start-prompt" rows="3" maxlength="4000" placeholder="Ex.: adicionar autenticação por token na API de relatórios"></textarea>
+              <div class="row-end">
+                <button id="start-submit" class="btn btn-primary" type="submit">Iniciar com o Ultron</button>
+              </div>
             </form>
           </section>
 
-          <aside class="side">
-            <section class="panel">
-              <h2>Perfil</h2>
-              <div id="profiles" class="segmented" role="radiogroup" aria-label="Perfil"></div>
-              <p class="muted small">Economia desce um degrau de effort (e tira o Opus de quem não planeja); qualidade sobe. Etapas editadas à mão ficam como estão.</p>
+          <section id="empty" class="panel empty" hidden>
+            <canvas id="empty-sprite" class="pixel big" width="24" height="24" aria-hidden="true"></canvas>
+            <h2>Nenhuma jornada ainda</h2>
+            <p>Chame <code>/ultron &lt;tarefa&gt;</code> no terminal desta sessão, ou inicie a tarefa acima. O plano aparece aqui para você aprovar.</p>
+          </section>
+
+          <div id="content" hidden>
+            <section id="approval" class="banner" hidden>
+              <div class="banner-text">
+                <strong>O Ultron aguarda sua aprovação</strong>
+                <span id="approval-detail"></span>
+              </div>
+              <div class="banner-actions">
+                <button id="approve" class="btn btn-primary">Aprovar fluxo</button>
+                <button id="ask-changes" class="btn">Pedir mudanças</button>
+              </div>
+              <form id="reject-form" class="reject-form" hidden>
+                <textarea id="reject-reason" rows="2" placeholder="O que o Ultron deve mudar no plano?"></textarea>
+                <div class="row-end">
+                  <button type="button" id="reject-cancel" class="btn btn-ghost">Voltar</button>
+                  <button type="submit" class="btn btn-danger">Enviar pedido</button>
+                </div>
+              </form>
             </section>
-            <section class="panel">
-              <h2>Consumo</h2>
-              <div id="mix" class="mix"></div>
-              <div id="mix-legend" class="legend"></div>
-              <div id="tokens" class="muted small"></div>
+
+            <section class="panel hero">
+              <div class="hero-main">
+                <div class="eyebrow">Objetivo</div>
+                <h1 id="goal"></h1>
+                <p id="rationale" class="muted"></p>
+                <div class="chips" id="chips"></div>
+              </div>
+              <div class="hero-side">
+                <div class="stat"><span class="stat-label">Status</span><span id="status" class="status-badge"></span></div>
+                <div class="stat"><span class="stat-label">Progresso</span><span id="progress" class="stat-value"></span></div>
+                <div class="stat"><span class="stat-label">Revisão</span><span id="revision" class="stat-value"></span></div>
+                <div class="hero-actions">
+                  <button id="pause" class="btn">Pausar</button>
+                  <button id="cancel" class="btn btn-danger-ghost">Cancelar</button>
+                </div>
+              </div>
             </section>
+
             <section class="panel">
-              <h2>Diário de bordo</h2>
-              <ol id="log" class="log"></ol>
+              <div class="section-head">
+                <h2>Jornada</h2>
+                <span id="journey-caption" class="muted"></span>
+              </div>
+              <div class="journey-scroll">
+                <div id="journey" class="journey">
+                  <div class="road"></div>
+                  <div id="road-lit" class="road road-lit"></div>
+                  <div id="stations" class="stations"></div>
+                  <div id="walker" class="walker"><canvas id="ultron" class="pixel" width="24" height="24"></canvas><span id="walker-say" class="say"></span></div>
+                </div>
+              </div>
             </section>
-          </aside>
+
+            <div class="grid">
+              <section class="panel">
+                <div class="section-head">
+                  <h2>Fluxo de agentes</h2>
+                  <span class="muted">Edite modelo, effort e etapas; cada mudança pede nova aprovação.</span>
+                </div>
+                <div class="table-wrap">
+                  <table class="flow">
+                    <thead>
+                      <tr>
+                        <th></th>
+                        <th>Etapa</th>
+                        <th>Papel</th>
+                        <th>Execução</th>
+                        <th>Modelo</th>
+                        <th>Effort</th>
+                        <th>Onda</th>
+                        <th>Depende de</th>
+                        <th>Status</th>
+                        <th></th>
+                      </tr>
+                    </thead>
+                    <tbody id="flow-body"></tbody>
+                  </table>
+                </div>
+                <form id="add-form" class="add-form">
+                  <input id="add-id" placeholder="id (ex.: docs)" pattern="[a-z0-9][a-z0-9-]{0,31}" required />
+                  <input id="add-title" placeholder="Título da nova etapa" required />
+                  <select id="add-role"></select>
+                  <input id="add-wave" type="number" min="1" value="1" aria-label="Onda" />
+                  <button class="btn" type="submit">+ Etapa</button>
+                </form>
+              </section>
+
+              <aside class="side">
+                <section class="panel">
+                  <h2>Perfil</h2>
+                  <div id="profiles" class="segmented" role="radiogroup" aria-label="Perfil"></div>
+                  <p class="muted small">Economia desce um degrau de effort (e tira o Opus de quem não planeja); qualidade sobe. Etapas editadas à mão ficam como estão.</p>
+                </section>
+                <section class="panel">
+                  <h2>Consumo</h2>
+                  <div id="mix" class="mix"></div>
+                  <div id="mix-legend" class="legend"></div>
+                  <div id="tokens" class="muted small"></div>
+                </section>
+                <section class="panel">
+                  <h2>Diário de bordo</h2>
+                  <ol id="log" class="log"></ol>
+                </section>
+              </aside>
+            </div>
+          </div>
+        </section>
+      </main>
+
+      <!-- Em execução: sessions running an Ultron flow right now -->
+      <aside class="rail" aria-label="Em execução">
+        <div class="rail-head">
+          <canvas id="rail-sprite" class="pixel" width="24" height="24" aria-hidden="true"></canvas>
+          <h2>Em execução</h2>
+          <span id="count-running" class="count">0</span>
         </div>
-      </div>
-      </div>
-      </div>
-      </div>
-    </main>
+        <div id="rail-list" class="rail-list"></div>
+        <p id="rail-empty" class="muted small" hidden>Nenhum fluxo do Ultron rodando agora.</p>
+      </aside>
+    </div>
 
     <div id="toast" class="toast" role="status" hidden></div>
     <script type="module" src="/app.js"></script>

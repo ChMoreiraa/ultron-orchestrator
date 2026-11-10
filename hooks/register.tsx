@@ -2,7 +2,8 @@ import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
 import { AGENT_REPO, TAG, agentBlock, agentSlug, applyInbox, apply, currentIndex, gate, inboxLines, isApproved, isTerminal, newRun, progress, statusText } from '../core/run-core'
-import type { Command, Model, Run, Step } from '../types'
+import type { Command, Identity, Model, Run, Step } from '../types'
+import { lineFor, momentOf } from '../core/quotes'
 import { cells, spark } from './sprite'
 import type { Pose } from './sprite'
 
@@ -10,13 +11,19 @@ const PANE = 'ultron'
 const TITLE = '🤖 Ultron'
 const DEFAULT_PORT = 4477
 
-// The mod stays out of the way until /ultron runs in this session: every hook
+// Every session registers itself for the dashboard (presence, below), but the
+// flow stays out of the way until /ultron runs in this session: every flow hook
 // checks `isActive` first and passes straight through without it.
 const activeAtom = atom({ plugin: 'ultron', key: 'isActive' } as const, false)
 const runAtom = atom({ plugin: 'ultron', key: 'run' } as const, null, { shape: 'run-1' })
 const frameAtom = atom({ plugin: 'ultron', key: 'frame' } as const, 0)
 const posAtom = atom({ plugin: 'ultron', key: 'pos' } as const, 0)
 const sessionAtom = atom({ plugin: 'ultron', key: 'sessionId' } as const, '')
+/** The last task from the dashboard this session ran, so a reload never runs it twice. */
+const lastTaskAtom = atom({ plugin: 'ultron', key: 'lastTaskId' } as const, '')
+/** This session's repo and the Marvel AI the dashboard named it after; null outside a repo. */
+const identityAtom = atom({ plugin: 'ultron', key: 'identity' } as const, null, { shape: 'identity-1' })
+const NO_REPO_COLOR = '#8a93a6'
 
 const TIER_COLOR: Record<Model, string> = { haiku: '#5fd0c5', sonnet: '#8f9bff', opus: '#d58cff' }
 const RED = '#e1263b'
@@ -154,12 +161,14 @@ async function activate($: EngineInterface) {
 
 const dashboardUrl = (sessionId: string) => `http://127.0.0.1:${port}/?session=${encodeURIComponent(sessionId)}`
 
+const SPRITE_W = 12
+
 /** Where the sprite should stand on a trail `width` columns wide. */
 function targetColumn(run: Run, width: number): number {
   const waves = [...new Set(run.steps.map(s => s.wave))].sort((a, b) => a - b)
   const at = currentWave(run, waves)
   const x = stationX(at, waves.length, width)
-  return Math.max(0, Math.min(width - 10, x - 5))
+  return Math.max(0, Math.min(width - SPRITE_W, x - SPRITE_W / 2))
 }
 
 function currentWave(run: Run, waves: number[]): number {
@@ -184,7 +193,7 @@ function poseOf(run: Run | null, isMoving: boolean): Pose {
 const trunc = (s: string, n: number) => (n <= 1 ? '' : s.length > n ? `${s.slice(0, n - 1)}…` : s)
 
 function speech(run: Run | null): string {
-  if (!run || run.revision === 0) return 'Montando o fluxo…'
+  if (!run || run.revision === 0) return 'Sem fluxo nesta sessão. Use /ultron <tarefa> ou inicie pelo dashboard.'
   const running = run.steps.filter(s => s.status === 'running')
   switch (run.status) {
     case 'awaiting_approval':
@@ -207,7 +216,175 @@ function speech(run: Run | null): string {
 const isUltronSkill = (skill: string) => skill === 'ultron' || skill.endsWith(':ultron')
 
 async function onCli($: EngineInterface, command: string) {
-  if (/ultron\.mjs/.test(command) && !(await isActive($))) await activate($)
+  if (!/ultron\.mjs/.test(command)) return
+  await followSession($).catch(() => {})
+  if (!(await isActive($))) await activate($)
+}
+
+// ---------------------------------------------------------------- presence: every session, flow or not
+
+/** The repository a session runs in: `key` names it for the AI names (owner/repo from origin, else the folder). */
+type RepoInfo = { key: string; name: string; root: string }
+type SessionInfo = { sessionId: string; cwd: string; branch: string | null; repo: RepoInfo | null; startedAt: number; at: number; endedAt?: number }
+type Task = { id: string; prompt: string; at: number; takenAt?: number; error?: string }
+
+// Per load, like `paths`; a reload starts presence again from session.start.
+let presenceTimers: { cancel: () => void }[] = []
+let presence: { file: string; task: string; names: string; info: SessionInfo } | null = null
+let taskStamp = ''
+
+async function git($: EngineInterface, cwd: string, args: string[]): Promise<string> {
+  const r = await $.process.run(['git', ...args], { cwd, timeoutMs: 5000 }).catch(() => null)
+  return r && r.exitCode === 0 ? r.stdout.trim() : ''
+}
+
+/** Branch and repository of the folder, or nulls outside a git repository. */
+async function gitInfo($: EngineInterface, cwd: string): Promise<{ branch: string | null; repo: RepoInfo | null }> {
+  const root = await git($, cwd, ['rev-parse', '--show-toplevel'])
+  if (!root) return { branch: null, repo: null }
+  const head = await git($, cwd, ['rev-parse', '--abbrev-ref', 'HEAD'])
+  const origin = await git($, cwd, ['remote', 'get-url', 'origin'])
+  const m = /[:/]([^/:]+)\/([^/]+?)(?:\.git)?\/?$/.exec(origin)
+  const name = m ? `${m[1]}/${m[2]}` : (slash(root).split('/').filter(Boolean).pop() ?? root)
+  return { branch: head && head !== 'HEAD' ? head : null, repo: { key: name.toLowerCase(), name, root: slash(root) } }
+}
+
+/** The AI name and colour the dashboard gave this session's repo, for the pane. */
+async function readIdentity($: EngineInterface) {
+  if (!presence) return
+  const repo = presence.info.repo
+  const names = repo && (await $.fs.exists(presence.names)) ? await readJson<{ repos?: Record<string, { name: string; color: string }> }>($, presence.names, {}) : {}
+  const ai = repo ? names.repos?.[repo.key] : undefined
+  const next: Identity | null = repo ? { name: ai?.name ?? '', color: ai?.color ?? NO_REPO_COLOR, repo: repo.name } : null
+  const held = await read($, identityAtom)
+  if (JSON.stringify(held) !== JSON.stringify(next)) await update($, identityAtom, () => next)
+}
+
+const writePresence = ($: EngineInterface) => (presence ? $.fs.write(presence.file, JSON.stringify(presence.info, null, 1)) : Promise.resolve())
+
+/** Registers this session for the dashboard's Sessions tab and keeps the dashboard up. Draws nothing. */
+async function startPresence($: EngineInterface, cwd: string) {
+  for (const t of presenceTimers) t.cancel()
+  const sessionId = await $.session.id()
+  const p = await pathsFor($, sessionId)
+  const file = `${p.home}/sessions/${sessionId}.json`
+  const held = (await $.fs.exists(file)) ? await readJson<SessionInfo | null>($, file, null) : null
+  const now = await $.clock.now()
+  presence = {
+    file,
+    task: `${p.home}/sessions/${sessionId}.task.json`,
+    names: `${p.home}/names.json`,
+    info: { sessionId, cwd: slash(cwd), ...(await gitInfo($, cwd)), startedAt: held?.startedAt ?? now, at: now },
+  }
+  await writePresence($)
+  await readIdentity($).catch(() => {})
+  // The pane shows in every session: Ultron waiting, with no flow until /ultron or a task from the dashboard.
+  const cfg = await readJson<{ port?: number }>($, p.config, {})
+  port = Number(cfg.port) || DEFAULT_PORT
+  await update($, sessionAtom, () => sessionId)
+  if (!(await read($, runAtom))) {
+    const run = await readJson<Run | null>($, p.run, null)
+    if (run) await update($, runAtom, () => run)
+  }
+  void openPane($)
+  presenceTimers = [
+    $.clock.every(3000, () => {
+      if (!presence) return
+      void followSession($)
+        .then(() => $.clock.now())
+        .then(at => {
+          if (!presence) return
+          presence.info = { ...presence.info, at }
+          return writePresence($).then(() => readIdentity($))
+        })
+        .catch(() => {})
+    }),
+    $.clock.every(30_000, () => {
+      if (!presence) return
+      void gitInfo($, presence.info.cwd).then(found => {
+        presence!.info = { ...presence!.info, ...found }
+      }).catch(() => {})
+    }),
+    $.clock.every(2000, () => void takeTask($).catch(err => $.ui.log(`ultron: tarefa do dashboard: ${String(err)}`, { to: 'debug' }))),
+  ]
+  // The dashboard lists every open session, so it is kept up from any of them.
+  void $.process
+    .run(['node', `${slash($.plugin.root)}/bin/ultron.mjs`, 'dashboard', '--no-open', '--session', sessionId], { timeoutMs: 15_000 })
+    .catch(err => $.ui.log(`ultron: dashboard não subiu: ${String(err)}`, { to: 'debug' }))
+}
+
+/** A task left by the dashboard runs here as `/ultron <task>`; the plan still waits for the person's approval. */
+async function takeTask($: EngineInterface) {
+  if (!presence || !(await $.fs.exists(presence.task))) return
+  const stat = await $.fs.stat(presence.task).catch(() => null)
+  const stamp = stat ? `${stat.size}:${stat.mtimeMs}` : ''
+  if (stamp === taskStamp) return
+  taskStamp = stamp
+  const task = await readJson<Task | null>($, presence.task, null)
+  if (!task || task.takenAt || task.id === (await read($, lastTaskAtom))) return
+  await update($, lastTaskAtom, () => task.id)
+  const takenAt = await $.clock.now()
+  await $.fs.write(presence.task, JSON.stringify({ ...task, takenAt }, null, 1))
+  const command = (await $.command.list()).find(c => isUltronSkill(c.name))?.name ?? 'ultron'
+  try {
+    await $.command.run({ command, args: task.prompt })
+  } catch (err) {
+    await $.fs.write(presence.task, JSON.stringify({ ...task, takenAt, error: String(err) }, null, 1))
+  }
+}
+
+/** Writes this session's end for the dashboard. */
+async function markEnded($: EngineInterface) {
+  if (!presence) return
+  const now = await $.clock.now()
+  presence.info = { ...presence.info, at: now, endedAt: now }
+  await writePresence($)
+}
+
+async function endPresence($: EngineInterface) {
+  for (const t of presenceTimers) t.cancel()
+  presenceTimers = []
+  await markEnded($)
+}
+
+/** A resumed session, or one reloaded mid-flow, picks its unfinished journey up again. */
+/** Set at session.start: a person is at the prompt (not `claude -p` or an SDK run). */
+let interactiveSession = false
+
+async function pickUpFlow($: EngineInterface) {
+  const p = await pathsFor($, await $.session.id())
+  const run = await readJson<Run | null>($, p.run, null)
+  // `autoActivate` in config.json: every session with a person at the prompt opens with the pane on.
+  // Planning still waits for /ultron; a `-p` run or the SDK stays inert.
+  const cfg = await readJson<{ autoActivate?: unknown }>($, p.config, {})
+  const isAuto = cfg.autoActivate === true && interactiveSession
+  if (isAuto || (await isActive($)) || (run && run.revision > 0 && !isTerminal(run.status))) await activate($)
+}
+
+let following: Promise<void> | null = null
+
+/**
+ * `/resume` and `/clear` end the session and carry on in the same process under
+ * another id, with no `session.start` for it: presence and the flow move over
+ * to the new id here, at the next heartbeat, prompt or CLI call.
+ */
+function followSession($: EngineInterface): Promise<void> {
+  following ??= (async () => {
+    if (!presence) return
+    const sessionId = await $.session.id()
+    if (sessionId === presence.info.sessionId) return
+    if (!presence.info.endedAt) await markEnded($)
+    // The flow belonged to the old session: let it go before looking at the new one's.
+    stopTimers()
+    paths = null
+    await update($, activeAtom, () => false)
+    await update($, runAtom, () => null)
+    await startPresence($, await $.session.cwd())
+    await pickUpFlow($)
+  })().finally(() => {
+    following = null
+  })
+  return following
 }
 
 export const register: Register = on => {
@@ -215,6 +392,7 @@ export const register: Register = on => {
 
   // Typing /ultron turns the mod on before the model reads the skill.
   on('prompt.submit', async ($, e, next) => {
+    await followSession($).catch(() => {})
     if (e.command && isUltronSkill(e.command.name) && !(await isActive($))) await activate($)
     return next(e)
   }).catch(($, e, next) => next(e))
@@ -229,22 +407,28 @@ export const register: Register = on => {
     return next(e)
   }).catch(($, e, next) => next(e))
 
+  // A task started from the dashboard arrives as a command, not a typed prompt.
+  on('command.run', async ($, e, next) => {
+    await followSession($).catch(() => {})
+    if (isUltronSkill(e.command) && !(await isActive($))) await activate($)
+    return next(e)
+  }).catch(($, e, next) => next(e))
+
   on('session.start', async ($, e, next) => {
     const r = await next(e)
+    // Every open session shows in the dashboard (not `claude -p` or an SDK run); the flow itself still waits for /ultron.
+    if (e.isInteractive) await startPresence($, e.cwd).catch(err => $.ui.log(`ultron: presença: ${String(err)}`, { to: 'debug' }))
     // A reload, or a resumed session that already had a journey: pick it up again.
-    const sessionId = await $.session.id()
-    const p = await pathsFor($, sessionId)
-    const run = await readJson<Run | null>($, p.run, null)
-    // `autoActivate` in config.json: every session with a person at the prompt opens with the pane on.
-    // Planning still waits for /ultron; a `-p` run or the SDK stays inert.
-    const cfg = await readJson<{ autoActivate?: unknown }>($, p.config, {})
-    const isAuto = cfg.autoActivate === true && e.isInteractive
-    if (isAuto || (await isActive($)) || (run && run.revision > 0 && !isTerminal(run.status))) await activate($)
+    interactiveSession = e.isInteractive === true
+    await pickUpFlow($)
     return r
   })
 
   on('session.end', async ($, e, next) => {
     stopTimers()
+    // After /resume or /clear the process goes on under another id: the heartbeat stays to follow it there.
+    const goesOn = e.reason === 'resume' || e.reason === 'clear'
+    await (goesOn ? markEnded($) : endPresence($)).catch(() => {})
     return next(e)
   })
 
@@ -303,10 +487,12 @@ export const register: Register = on => {
     const frame = await read($, frameAtom)
     const pos = await read($, posAtom)
     const sessionId = await read($, sessionAtom)
+    const identity = await read($, identityAtom)
+    const now = await $.clock.now()
 
     // `pos` walks on a 40-column trail (see animate); scale it to this width.
     const isMoving = run !== null && pos !== targetColumn(run, 40)
-    const left = Math.max(0, Math.min(width - 12, Math.round((pos / 30) * (width - 10))))
+    const left = Math.max(0, Math.min(width - SPRITE_W - 2, Math.round((pos / (40 - SPRITE_W)) * (width - SPRITE_W - 2))))
     const pose = poseOf(run, isMoving)
     const sprite = cells(pose, frame)
 
@@ -351,6 +537,16 @@ export const register: Register = on => {
 
     return (
       <Box flexDirection="column" paddingX={1}>
+        {identity ? (
+          <Text wrap="truncate">
+            <Text color={identity.color} bold>
+              ◉ {identity.name || '…'}
+            </Text>
+            <Text dimColor> · {trunc(identity.repo, width - (identity.name.length || 1) - 6)}</Text>
+          </Text>
+        ) : (
+          <Text dimColor>○ sessão sem repositório</Text>
+        )}
         {sprite.map((row, i) => (
           <Text key={`s${i}`}>
             {pad}
@@ -370,7 +566,14 @@ export const register: Register = on => {
           ))}
         </Text>
         <Box borderStyle="round" borderColor={RED} paddingX={1} marginTop={1}>
-          <Text wrap="wrap">{speech(run)}</Text>
+          <Box flexDirection="column">
+            <Text wrap="wrap" bold>
+              {lineFor(run, momentOf(run, isMoving), now)}
+            </Text>
+            <Text wrap="wrap" dimColor>
+              {speech(run)}
+            </Text>
+          </Box>
         </Box>
         {run && run.revision > 0 && (
           <Box flexDirection="column" marginTop={1}>

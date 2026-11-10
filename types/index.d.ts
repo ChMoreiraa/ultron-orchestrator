@@ -114,6 +114,9 @@ export type Command = { id?: string; at?: number; by?: string } & (
 
 export type Applied = { ok: boolean; error?: string; notify?: string }
 
+/** The repo a session runs in and the Marvel AI it goes by while open. */
+export type Identity = { name: string; color: string; repo: string }
+
 declare module 'claude-code' {
   interface PluginState {
     ultron: {
@@ -123,6 +126,10 @@ declare module 'claude-code' {
       /** Where the sprite stands on the trail, in columns from the left. */
       pos: number
       sessionId: string
+      /** The id of the last task from the dashboard this session started. */
+      lastTaskId: string
+      /** This session's repo and its Marvel AI (empty name until the dashboard names it); null outside a repo. */
+      identity: Shaped<Identity | null>
     }
   }
 }

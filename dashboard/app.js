@@ -1,11 +1,16 @@
-import { draw } from './sprite.js'
+import { drawAllHolos } from './holo.js'
+import { lineFor, momentOf } from './quotes.js'
+import { draw, drawHead } from './sprite.js'
 
 const $ = id => document.getElementById(id)
 
 const S = {
   meta: null,
-  runs: [],
-  sid: new URLSearchParams(location.search).get('session') ?? '',
+  /** Every session the mod saw (GET /api/sessions), kept live by its stream. */
+  sessions: [],
+  /** `sessions`, `finished` or `flow`; `sid` is the flow's session. */
+  view: 'sessions',
+  sid: '',
   run: null,
   /** The run's cost, pushed with every run snapshot; null until one arrives. */
   custo: null,
@@ -81,45 +86,366 @@ async function post(cmd) {
 
 // ------------------------------------------------------------ data
 
-async function loadRuns() {
-  try {
-    const r = await fetch('/api/runs')
-    S.runs = (await r.json()).runs ?? []
-  } catch {
-    return
+/** The sessions list, pushed by the server whenever a session opens, closes or moves. */
+let liveSessions
+function connectSessions() {
+  liveSessions?.close()
+  liveSessions = new EventSource('/api/sessions/stream')
+  liveSessions.addEventListener('sessions', e => {
+    S.isLive = true
+    S.sessions = JSON.parse(e.data)
+    renderLists()
+    if (S.view === 'flow') renderSessionHead()
+  })
+  liveSessions.onopen = () => {
+    S.isLive = true
+    renderPills()
   }
-  if (!S.sid && S.runs[0]) {
-    S.sid = S.runs[0].sessionId
-    history.replaceState(null, '', `?session=${encodeURIComponent(S.sid)}${location.hash}`)
-    connect()
+  liveSessions.onerror = () => {
+    S.isLive = false
+    renderPills()
   }
-  renderSessions()
-  if (!S.sid) render()
 }
 
 let source
+/** One session's run, while its flow is on screen. */
 function connect() {
   source?.close()
-  if (!S.sid) return
+  source = null
+  if (S.view !== 'flow' || !S.sid) return
   source = new EventSource(`/api/runs/${encodeURIComponent(S.sid)}/stream`)
-  source.addEventListener('run', e => {
-    S.isLive = true
-    apply(JSON.parse(e.data))
-  })
-  source.onopen = () => {
-    S.isLive = true
-    renderPills()
+  source.addEventListener('run', e => apply(JSON.parse(e.data)))
+}
+
+// ------------------------------------------------------------ routing: #/sessoes, #/finalizadas, #/sessao/<id>
+
+function route() {
+  const legacy = new URLSearchParams(location.search).get('session')
+  if (legacy && !location.hash) {
+    history.replaceState(null, '', `${location.pathname}#/sessao/${encodeURIComponent(legacy)}`)
   }
-  source.onerror = () => {
-    S.isLive = false
-    renderPills()
+  // Link antigo da torre (`#agente=<id>`) vira a rota da aba Agentes.
+  const legacyAgent = /^#agente=(.+)$/.exec(location.hash)
+  if (legacyAgent) history.replaceState(null, '', `${location.pathname}#/agente/${legacyAgent[1]}`)
+  const m = /^#\/sessao\/([\w-]{1,80})$/.exec(location.hash)
+  const ag = /^#\/agente\/(.+)$/.exec(location.hash)
+  const view = m ? 'flow' : ag || location.hash === '#/agentes' ? 'agentes' : location.hash === '#/finalizadas' ? 'finished' : 'sessions'
+  const sid = m ? m[1] : ''
+  AG.sel = null
+  if (ag) {
+    try {
+      AG.sel = decodeURIComponent(ag[1])
+    } catch {
+      AG.sel = null
+    }
+  }
+  if (sid !== S.sid) {
+    S.run = null
+    S.custo = null
+    S.agent = null
+    S.isAlive = false
+    S.walker = { left: null, movingUntil: 0 }
+  }
+  S.view = view
+  S.sid = sid
+  $('view-sessions').hidden = view !== 'sessions'
+  $('view-finished').hidden = view !== 'finished'
+  $('view-flow').hidden = view !== 'flow'
+  $('view-agentes').hidden = view !== 'agentes'
+  for (const [tab, v] of [['tab-sessions', 'sessions'], ['tab-finished', 'finished'], ['tab-agentes', 'agentes']]) {
+    $(tab).classList.toggle('on', view === v)
+    $(tab).setAttribute('aria-current', view === v ? 'page' : 'false')
+  }
+  connect()
+  if (view === 'agentes') {
+    if (!AG.source || AG.source.readyState === EventSource.CLOSED) connectAgentes()
+    renderAgentes()
+  } else if (AG.source || AG.poll) connectAgentes()
+  renderLists()
+  if (view === 'flow') {
+    renderSessionHead()
+    render()
+  }
+  window.scrollTo(0, 0)
+}
+
+const go = sid => (location.hash = `#/sessao/${encodeURIComponent(sid)}`)
+
+// ------------------------------------------------------------ sessions: cards, tabs and the running rail
+
+const sessionOf = sid => S.sessions.find(s => s.sessionId === sid) ?? null
+const isRunning = s => s.isAlive && s.run && !isTerminal(s.run.status)
+const nameOf = s => s.title || s.project || `sessão ${s.sessionId.slice(0, 8)}`
+
+function ago(ms) {
+  if (!ms) return ''
+  const s = Math.max(0, Math.round((Date.now() - ms) / 1000))
+  if (s < 60) return 'agora'
+  if (s < 3600) return `há ${Math.round(s / 60)} min`
+  if (s < 86_400) return `há ${Math.round(s / 3600)} h`
+  return `há ${Math.round(s / 86_400)} d`
+}
+
+/** The tail of a path, enough to recognise the folder. */
+function shortPath(p) {
+  if (!p) return ''
+  const parts = p.replace(/\\/g, '/').split('/').filter(Boolean)
+  return parts.length > 3 ? `…/${parts.slice(-3).join('/')}` : parts.join('/')
+}
+
+function progressBar(run) {
+  const pct = run.total ? Math.round((run.done / run.total) * 100) : 0
+  return el('div', { class: 'bar', title: `${run.done}/${run.total} etapas` }, el('span', { style: `width:${pct}%` }))
+}
+
+/** Where the flow stands, in one line: the wave and the step in progress. */
+function stepLine(run) {
+  if (run.status === 'done') return `Concluído · ${run.done}/${run.total} etapas`
+  if (run.status === 'awaiting_approval') return `Aguardando aprovação · ${run.total} etapas em ${run.waves} onda(s)`
+  if (!run.step) return `${run.done}/${run.total} etapas`
+  const who = run.step.mode === 'inline' ? 'Ultron' : `${run.step.model}/${run.step.effort}`
+  const more = run.running > 1 ? ` (+${run.running - 1})` : ''
+  return `Onda ${run.wave}/${run.waves} · ${run.step.title}${more} · ${who}`
+}
+
+function statusBadge(status) {
+  return el('span', { class: `status-badge st-${status}` }, STATUS_PT[status] ?? status)
+}
+
+const NEUTRAL = '#8a93a6'
+
+/** The hologram of the session's AI; a closed or repo-less session gets a faint neutral one. */
+function holo(s, size) {
+  const color = s.ai ? s.ai.color : NEUTRAL
+  return el('canvas', { class: `holo holo-${size}`, 'data-holo': color, 'data-dim': s.ai ? '0' : '1', 'aria-hidden': 'true' })
+}
+
+/** One labelled line of a card: what it is, then the value. */
+const info = (label, value, extra = {}) => (value ? el('div', { class: 'info-row' }, el('dt', {}, label), el('dd', extra, value)) : null)
+
+function flowBlock(s, isCompact) {
+  const run = s.run
+  if (run) {
+    return el(
+      'div',
+      { class: 'scard-flow' },
+      el('div', { class: 'scard-status' }, statusBadge(run.status), isCompact ? null : el('span', { class: 'muted small' }, run.playbook)),
+      isCompact ? null : el('p', { class: 'scard-goal' }, run.goal),
+      progressBar(run),
+      el('div', { class: 'scard-step' }, stepLine(run)),
+    )
+  }
+  if (s.pendingTask) return el('p', { class: 'scard-todo' }, '⏳ Tarefa na fila: ', el('span', { class: 'muted' }, s.pendingTask.prompt))
+  return el('p', { class: 'scard-todo' }, 'Sem fluxo do Ultron. ', el('strong', {}, 'Defina uma tarefa'), ' para montar o fluxo.')
+}
+
+function sessionCard(s, kind) {
+  const run = s.run
+  const isCompact = kind === 'rail'
+  const title = nameOf(s)
+  const headline = s.ai ? s.ai.label : title
+  const footer = isCompact
+    ? null
+    : el(
+        'footer',
+        { class: 'scard-foot' },
+        el('span', { class: 'mono muted small', title: s.sessionId }, s.sessionId.slice(0, 8)),
+        el('span', { class: 'muted small' }, s.isAlive ? `aberta ${ago(s.startedAt)}` : `encerrada ${ago(s.lastSeen)}`),
+        kind === 'finished' ? el('button', { class: 'btn btn-small', type: 'button', onclick: e => (e.stopPropagation(), go(s.sessionId), focusStart()) }, 'Continuar com nova tarefa') : null,
+        kind === 'sessions' && (!run || isTerminal(run.status)) && !s.pendingTask
+          ? el('button', { class: 'btn btn-small', type: 'button', onclick: e => (e.stopPropagation(), go(s.sessionId), focusStart()) }, run ? 'Nova tarefa' : 'Definir fluxo')
+          : null,
+      )
+  return el(
+    'article',
+    {
+      class: `scard ${isCompact ? 'compact' : kind} ${s.isAlive ? 'alive' : 'closed'} ${s.ai ? 'has-ai' : 'no-ai'} ${run ? `run-${run.status}` : 'no-run'} ${s.sessionId === S.sid && S.view === 'flow' ? 'selected' : ''}`,
+      style: `--ai:${s.ai ? s.ai.color : NEUTRAL}`,
+      tabindex: '0',
+      role: 'link',
+      'aria-label': `Abrir o fluxo de ${headline}`,
+      onclick: () => go(s.sessionId),
+      onkeydown: e => (e.key === 'Enter' || e.key === ' ') && (e.preventDefault(), go(s.sessionId)),
+    },
+    el(
+      'header',
+      { class: 'scard-head' },
+      holo(s, isCompact ? 'xs' : 'sm'),
+      el(
+        'div',
+        { class: 'scard-names' },
+        el('h3', { class: 'scard-title', title: headline }, headline),
+        s.ai ? el('div', { class: 'scard-sub', title }, title) : null,
+      ),
+      el('span', { class: 'dot', title: s.isAlive ? 'sessão aberta' : 'sessão encerrada' }),
+    ),
+    isCompact
+      ? null
+      : el(
+          'dl',
+          { class: 'scard-info' },
+          info('Repositório', s.repo?.name, { class: 'mono' }),
+          info('Branch', s.branch ? el('span', { class: 'chip branch' }, '⎇ ', s.branch) : null),
+          info('Pasta', shortPath(s.cwd), { class: 'mono', title: s.cwd ?? '' }),
+        ),
+    flowBlock(s, isCompact),
+    footer,
+  )
+}
+
+/** Open sessions grouped by repository, each group under its AI's name and colour; repo-less ones last. */
+function repoGroups(active) {
+  const groups = new Map()
+  for (const s of active) {
+    const key = s.repo?.key ?? ''
+    if (!groups.has(key)) groups.set(key, [])
+    groups.get(key).push(s)
+  }
+  const keyed = [...groups.entries()].sort(([a, x], [b, y]) => (a === '') - (b === '') || Number(y.some(isRunning)) - Number(x.some(isRunning)) || (x[0].ai?.name ?? '').localeCompare(y[0].ai?.name ?? ''))
+  return keyed.map(([key, list]) => {
+    const lead = list[0]
+    const ai = key ? lead.ai : null
+    const running = list.filter(isRunning).length
+    return el(
+      'section',
+      { class: `repo-group ${ai ? 'has-ai' : 'no-ai'}`, style: `--ai:${ai ? ai.color : NEUTRAL}` },
+      el(
+        'header',
+        { class: 'repo-head' },
+        holo(key ? lead : { ai: null }, 'md'),
+        el(
+          'div',
+          { class: 'repo-names' },
+          el('h2', { class: 'repo-ai' }, ai ? ai.name : 'Sem repositório'),
+          el('div', { class: 'repo-name mono' }, key ? lead.repo.name : 'sessões fora de um repositório git'),
+        ),
+        el('div', { class: 'repo-count' }, el('strong', {}, String(list.length)), list.length === 1 ? ' sessão' : ' sessões', running ? el('span', { class: 'muted' }, ` · ${running} com fluxo`) : null),
+      ),
+      el('div', { class: 'session-grid' }, list.map(s => sessionCard(s, 'sessions'))),
+    )
+  })
+}
+
+function renderLists() {
+  const active = S.sessions.filter(s => s.isAlive).sort((a, b) => Number(isRunning(b)) - Number(isRunning(a)) || (a.startedAt ?? 0) - (b.startedAt ?? 0))
+  const finished = S.sessions.filter(s => !s.isAlive && s.run).sort((a, b) => (b.lastSeen ?? 0) - (a.lastSeen ?? 0))
+  const running = S.sessions.filter(isRunning).sort((a, b) => (b.run.updatedAt ?? 0) - (a.run.updatedAt ?? 0))
+  $('count-alive').textContent = String(active.length)
+  $('count-done').textContent = String(finished.length)
+  $('count-running').textContent = String(running.length)
+  if (S.view === 'sessions') {
+    $('sessions-grid').replaceChildren(...repoGroups(active))
+    $('sessions-empty').hidden = active.length > 0
+    const repos = new Set(active.map(s => s.repo?.key).filter(Boolean)).size
+    $('sessions-caption').textContent = active.length ? `${active.length} aberta(s) em ${repos} repositório(s) · ${running.length} com fluxo em andamento` : ''
+  }
+  if (S.view === 'finished') {
+    $('finished-grid').replaceChildren(...finished.map(s => sessionCard(s, 'finished')))
+    $('finished-empty').hidden = finished.length > 0
+    $('finished-caption').textContent = finished.length ? `${finished.length} sessão(ões) encerrada(s) em que o Ultron trabalhou` : ''
+  }
+  $('rail-list').replaceChildren(...running.map(s => sessionCard(s, 'rail')))
+  $('rail-empty').hidden = running.length > 0
+}
+
+/** The flow screen's header: which AI, which session, where, and whether it is open. */
+function renderSessionHead() {
+  const s = sessionOf(S.sid)
+  const title = s ? nameOf(s) : `sessão ${S.sid.slice(0, 8)}`
+  const head = $('view-flow').querySelector('.flow-head')
+  head.style.setProperty('--ai', s?.ai ? s.ai.color : NEUTRAL)
+  const h = $('flow-holo')
+  h.dataset.holo = s?.ai ? s.ai.color : NEUTRAL
+  h.dataset.dim = s?.ai ? '0' : '1'
+  $('session-ai').textContent = s?.ai ? s.ai.label : ''
+  $('session-ai').hidden = !s?.ai
+  $('session-title').textContent = title
+  const meta = []
+  if (s?.repo) meta.push(el('span', { class: 'chip mono' }, s.repo.name))
+  if (s?.branch) meta.push(el('span', { class: 'chip branch' }, '⎇ ', s.branch))
+  if (s?.cwd) meta.push(el('span', { class: 'mono muted small', title: s.cwd }, shortPath(s.cwd)))
+  meta.push(
+    el(
+      'button',
+      {
+        class: 'chip copy',
+        type: 'button',
+        title: 'Copiar o comando para retomar esta sessão',
+        onclick: () => copy(`claude --resume ${S.sid}`),
+      },
+      el('span', { class: 'mono' }, S.sid.slice(0, 8)),
+      ' ⧉',
+    ),
+  )
+  if (s) meta.push(el('span', { class: 'muted small' }, s.isAlive ? `aberta ${ago(s.startedAt)}` : `encerrada ${ago(s.lastSeen)}`))
+  $('session-meta').replaceChildren(...meta)
+  S.isAlive = Boolean(s?.isAlive)
+  renderPills()
+  renderStart()
+}
+
+async function copy(text) {
+  try {
+    await navigator.clipboard.writeText(text)
+    toast(`Copiado: ${text}`)
+  } catch {
+    toast(text)
+  }
+}
+
+// ------------------------------------------------------------ starting a task from here
+
+/** Shown while the session has no flow under way: a new task, sent to the session's terminal. */
+function renderStart() {
+  const s = sessionOf(S.sid)
+  const run = S.run
+  const isUnderWay = run && run.revision > 0 && !isTerminal(run.status)
+  const panel = $('start')
+  panel.hidden = S.view !== 'flow' || isUnderWay || (!s && !run)
+  if (panel.hidden) return
+  const isOpen = Boolean(s?.isAlive)
+  $('start-title').textContent = isOpen ? (run ? 'Nova tarefa nesta sessão' : 'Iniciar uma tarefa nesta sessão') : 'Continuar esta sessão com uma nova tarefa'
+  $('start-hint').textContent = isOpen
+    ? 'A tarefa roda como /ultron <tarefa> no terminal desta sessão. O Ultron monta o fluxo e espera a sua aprovação aqui.'
+    : 'Abre um terminal na pasta da sessão com claude --resume. A tarefa começa assim que a sessão voltar, e o plano espera a sua aprovação.'
+  $('start-submit').textContent = isOpen ? 'Iniciar com o Ultron' : 'Abrir sessão e iniciar'
+  const pending = s?.pendingTask
+  $('start-pending').hidden = !pending
+  $('start-form').hidden = Boolean(pending)
+  if (pending) $('start-pending-text').textContent = `⏳ Na fila: “${pending.prompt}” (${ago(pending.at)})`
+}
+
+function focusStart() {
+  setTimeout(() => $('start-prompt').focus(), 60)
+}
+
+async function sendTask(body) {
+  try {
+    const r = await fetch(`/api/sessions/${encodeURIComponent(S.sid)}/task`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(body),
+    })
+    const answer = await r.json()
+    if (!answer.ok) {
+      toast(answer.error ?? 'Não deu certo', true)
+      return false
+    }
+    if (answer.warning) toast(answer.warning, true)
+    else if (answer.mode === 'opened') toast('Abrindo a sessão num terminal; a tarefa começa quando ela voltar.')
+    else if (answer.mode === 'sent') toast('Tarefa enviada: o Ultron vai montar o fluxo nesta sessão.')
+    return true
+  } catch (err) {
+    toast(`Sem conexão com o dashboard: ${err.message}`, true)
+    return false
   }
 }
 
 function apply({ run, isAlive, agent, custo }) {
   S.run = run
   S.custo = custo ?? null
-  S.isAlive = isAlive
+  // The session's own heartbeat says whether it is open; the run's says whether the flow answers.
+  S.isAlive = Boolean(sessionOf(S.sid)?.isAlive || isAlive)
   if (agent !== undefined) S.agent = agent
   render()
 }
@@ -128,6 +454,8 @@ function apply({ run, isAlive, agent, custo }) {
 
 function render() {
   renderPills()
+  if (S.view !== 'flow') return
+  renderStart()
   const run = S.run
   const hasRun = Boolean(run && run.revision > 0)
   $('empty').hidden = hasRun
@@ -148,20 +476,9 @@ function renderPills() {
   live.textContent = S.isLive ? '● ao vivo' : '● offline'
   live.className = `pill ${S.isLive ? 'pill-ok' : 'pill-muted'}`
   const alive = $('alive')
-  alive.textContent = S.isAlive ? 'sessão ativa' : 'sessão encerrada'
+  alive.textContent = S.isAlive ? 'sessão aberta' : 'sessão encerrada'
   alive.className = `pill ${S.isAlive ? 'pill-ok' : 'pill-warn'}`
-  alive.title = S.isAlive ? 'O Claude Code está rodando esta sessão' : 'A sessão do Claude Code não está respondendo; mudanças ficam gravadas para quando ela voltar'
-}
-
-function renderSessions() {
-  const sel = $('session')
-  sel.replaceChildren(
-    ...(S.runs.length ? [] : [el('option', { value: '' }, 'nenhuma sessão')]),
-    ...S.runs.map(r =>
-      el('option', { value: r.sessionId, selected: r.sessionId === S.sid }, `${r.isAlive ? '● ' : ''}${r.goal.slice(0, 48) || r.sessionId.slice(0, 8)} — ${STATUS_PT[r.status] ?? r.status}`),
-    ),
-  )
-  if (S.sid && !S.runs.some(r => r.sessionId === S.sid)) sel.prepend(el('option', { value: S.sid, selected: true }, `sessão ${S.sid.slice(0, 8)}`))
+  alive.title = S.isAlive ? 'O Claude Code está rodando esta sessão' : 'A sessão do Claude Code não está aberta; mudanças ficam gravadas para quando ela voltar'
 }
 
 function renderBanner(run) {
@@ -254,13 +571,16 @@ function renderJourney(run) {
   placeWalker(at)
 }
 
+/** Half the walker's width (see .walker in styles.css). */
+const WALKER_HALF = 80
+
 /** Puts Ultron over the station in progress; the CSS transition makes him walk there. */
 function placeWalker(at) {
   const target = $('stations').querySelector(`[data-i="${at}"] .node`)
   const journey = $('journey')
   if (!target || journey.offsetParent === null) return
   const center = target.getBoundingClientRect().left - journey.getBoundingClientRect().left + target.offsetWidth / 2
-  const left = Math.round(center - 36)
+  const left = Math.round(center - WALKER_HALF)
   if (S.walker.left !== null && S.walker.left !== left) {
     S.walker.movingUntil = performance.now() + 900
     target.closest('.station')?.scrollIntoView({ behavior: 'smooth', inline: 'center', block: 'nearest' })
@@ -280,22 +600,9 @@ function pose(run, now) {
   return 'idle'
 }
 
+/** Ultron's line for the moment: the same one the terminal pane shows at the same time. */
 function sayFor(run, p) {
-  const running = run.steps.filter(s => s.status === 'running')
-  switch (p) {
-    case 'wait':
-      return 'Aprova o fluxo?'
-    case 'walk':
-      return 'a caminho…'
-    case 'work':
-      return running.length > 1 ? `${running.length} agentes em ação` : `trabalhando: ${running[0]?.id}`
-    case 'win':
-      return 'Missão cumprida!'
-    case 'fail':
-      return run.status === 'cancelled' ? 'Cancelado.' : 'Algo falhou…'
-    default:
-      return run.status === 'paused' ? 'Pausado.' : run.status === 'approved' ? 'Pronto para partir!' : ''
-  }
+  return lineFor(run, momentOf(run, p === 'walk'), Date.now())
 }
 
 const opt = (value, label, current) => el('option', { value, selected: value === current }, label)
@@ -454,7 +761,7 @@ function renderLog(run) {
   )
 }
 
-// ------------------------------------------------------------ torre: lista de agentes + perfil
+// ------------------------------------------------------------ torre: aba Agentes (lista estilo WhatsApp + perfil)
 
 const AG = { agentes: null, geradoEm: null, lastAt: 0, live: false, warn: '', source: null, poll: null, sel: null }
 const ESTADO_PT = { aguardando: 'aguardando você', executando: 'executando', pausado: 'pausado', ocioso: 'ocioso', sem_sinal: 'sem sinal' }
@@ -471,9 +778,9 @@ const initials = nome =>
 
 /** Cor fixa por id: o mesmo agente tem sempre o mesmo círculo. */
 function hueOf(id) {
-  let h = 0
-  for (const c of String(id)) h = (h * 31 + c.codePointAt(0)) >>> 0
-  return h % 360
+  let n = 0
+  for (const c of String(id)) n = (n * 31 + c.codePointAt(0)) >>> 0
+  return n % 360
 }
 
 const estadoOf = a => (ESTADO_PT[a.estado] ? a.estado : 'ocioso')
@@ -483,8 +790,8 @@ function avatarEl(a, size) {
   const cls = `av av-${size}`
   const fallback = () => el('span', { class: `${cls} av-initials`, style: `background:hsl(${hueOf(a.id)} 45% 36%)`, 'aria-hidden': 'true' }, initials(a.nome))
   if (typeof a.avatar !== 'string' || !AVATAR_RE.test(a.avatar)) return fallback()
-  // A lista é refeita a cada mudança (o Higuruma avisa a cada 10 s) e o avatar sai com `no-store`: reaproveita o
-  // mesmo <img> para a foto não piscar nem ser baixada de novo a cada quadro.
+  // A lista é refeita a cada mudança e o avatar sai com `no-store`: reaproveita o mesmo <img>
+  // para a foto não piscar nem ser baixada de novo a cada quadro.
   const key = `${a.id}|${size}|${a.avatar}`
   let node = AV_CACHE.get(key)
   if (!node) {
@@ -512,7 +819,7 @@ function stamp(ms) {
   return d.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' })
 }
 
-function ago(ms) {
+function agoAtualizado(ms) {
   if (typeof ms !== 'number' || !Number.isFinite(ms)) return 'sem registro'
   const s = Math.max(0, Math.round((Date.now() - ms) / 1000))
   if (s < 60) return `atualizado há ${s}s`
@@ -524,8 +831,7 @@ const isHttp = u => typeof u === 'string' && /^https?:\/\//i.test(u)
 
 function agentRow(a) {
   const estado = estadoOf(a)
-  const isUltron = a.tipo === 'ultron' && Boolean(a.sessao)
-  const open = AG.sel !== null ? AG.sel === a.id : isUltron && a.sessao === S.sid
+  const open = AG.sel === a.id
   const preview = a.fazendo || a.papel || ESTADO_PT[estado]
   return el(
     'button',
@@ -550,6 +856,8 @@ function agentRow(a) {
 
 function renderAgentes() {
   const list = AG.agentes
+  if (list) $('count-agentes').textContent = String(list.length)
+  if (S.view !== 'agentes') return
   $('agentes-empty').hidden = !(list && list.length === 0)
   const keep = document.activeElement?.closest?.('.lr')?.dataset.id
   $('agentes-list').replaceChildren(...(list ?? []).map(agentRow))
@@ -569,7 +877,9 @@ function field(label, value) {
 
 function renderPerfil() {
   const box = $('perfil')
-  if (AG.sel === null) return
+  if (AG.sel === null) {
+    return box.replaceChildren(el('div', { class: 'pf-vazio' }, el('h2', {}, 'Agentes'), el('p', { class: 'muted' }, 'Escolha um agente na lista para ver o que ele está fazendo.')))
+  }
   const a = AG.agentes?.find(x => x.id === AG.sel)
   if (!AG.agentes) return box.replaceChildren(el('p', { class: 'muted' }, 'Carregando…'))
   if (!a) {
@@ -577,53 +887,53 @@ function renderPerfil() {
       el('h2', {}, 'Agente'),
       el('p', { class: 'pf-missing', role: 'status' }, 'agente não encontrado'),
       el('p', { class: 'muted small' }, 'Ele não está mais na lista (o arquivo de presença sumiu ou a sessão fechou).'),
-      el('button', { class: 'btn', type: 'button', onclick: () => goRoute(null) }, 'Voltar à jornada'),
+      el('a', { class: 'btn', href: '#/agentes' }, 'Voltar à lista'),
     )
   }
   const estado = estadoOf(a)
   box.replaceChildren(
     ...[
-    el(
-      'div',
-      { class: `pf-head ag-${estado}` },
-      avatarEl(a, 'l'),
       el(
         'div',
-        { class: 'pf-id' },
-        el('h1', {}, a.nome),
-        a.papel && el('div', { class: 'muted' }, a.papel),
-        el('span', { class: 'ag-state' }, el('i', { class: 'ag-dot', 'aria-hidden': 'true' }), ESTADO_PT[estado]),
+        { class: `pf-head ag-${estado}` },
+        avatarEl(a, 'l'),
+        el(
+          'div',
+          { class: 'pf-id' },
+          el('h1', {}, a.nome),
+          a.papel && el('div', { class: 'muted' }, a.papel),
+          el('span', { class: 'ag-state' }, el('i', { class: 'ag-dot', 'aria-hidden': 'true' }), ESTADO_PT[estado]),
+        ),
       ),
-    ),
-    a.erro && el('div', { class: 'ag-error', role: 'alert' }, '⚠ ', a.erro),
-    el(
-      'div',
-      { class: 'pf-fields' },
-      field('Fazendo', a.fazendo ?? '—'),
-      field('Fila', a.fila === null || a.fila === undefined ? '—' : String(a.fila)),
-      field('Sessão', a.sessao ? el('span', { class: 'mono', title: a.sessao }, a.sessao.slice(0, 8)) : '—'),
-      field('Atualizado', el('span', { id: 'pf-age' }, ago(a.atualizadoEm))),
-    ),
-    a.tipo === 'ultron' && a.sessao && el('button', { class: 'btn', type: 'button', onclick: () => goRoute(null, a.sessao) }, 'Abrir a jornada'),
-    el('h2', { class: 'pf-sub' }, 'Projetos'),
-    a.projetos?.length
-      ? el(
-          'ul',
-          { class: 'pf-projects' },
-          a.projetos.map(p =>
-            el(
-              'li',
-              {},
-              el('span', { class: 'pf-repo mono' }, p.repo),
-              p.item && el('span', { class: 'pf-item mono' }, p.item),
-              p.titulo && el('span', { class: 'pf-title' }, p.titulo),
-              p.estado && el('span', { class: 'ag-badge' }, p.estado),
-              isHttp(p.link) && el('a', { href: p.link, target: '_blank', rel: 'noopener noreferrer' }, 'abrir ↗'),
+      a.erro && el('div', { class: 'ag-error', role: 'alert' }, '⚠ ', a.erro),
+      el(
+        'div',
+        { class: 'pf-fields' },
+        field('Fazendo', a.fazendo ?? '—'),
+        field('Fila', a.fila === null || a.fila === undefined ? '—' : String(a.fila)),
+        field('Sessão', a.sessao ? el('span', { class: 'mono', title: a.sessao }, a.sessao.slice(0, 8)) : '—'),
+        field('Atualizado', el('span', { id: 'pf-age' }, agoAtualizado(a.atualizadoEm))),
+      ),
+      a.tipo === 'ultron' && a.sessao && el('button', { class: 'btn', type: 'button', onclick: () => go(a.sessao) }, 'Abrir a jornada'),
+      el('h2', { class: 'pf-sub' }, 'Projetos'),
+      a.projetos?.length
+        ? el(
+            'ul',
+            { class: 'pf-projects' },
+            a.projetos.map(p =>
+              el(
+                'li',
+                {},
+                el('span', { class: 'pf-repo mono' }, p.repo),
+                p.item && el('span', { class: 'pf-item mono' }, p.item),
+                p.titulo && el('span', { class: 'pf-title' }, p.titulo),
+                p.estado && el('span', { class: 'ag-badge' }, p.estado),
+                isHttp(p.link) && el('a', { href: p.link, target: '_blank', rel: 'noopener noreferrer' }, 'abrir ↗'),
+              ),
             ),
-          ),
-        )
-      : el('p', { class: 'muted small' }, 'Nenhum projeto informado.'),
-    el('p', { class: 'muted small pf-note' }, 'Passos, linha do tempo e custo ao vivo chegam na próxima etapa da torre.'),
+          )
+        : el('p', { class: 'muted small' }, 'Nenhum projeto informado.'),
+      el('p', { class: 'muted small pf-note' }, 'Passos, linha do tempo e custo ao vivo chegam na próxima etapa da torre.'),
     ].filter(Boolean),
   )
 }
@@ -631,7 +941,7 @@ function renderPerfil() {
 function renderAge() {
   const a = AG.sel !== null ? AG.agentes?.find(x => x.id === AG.sel) : null
   const n = $('pf-age')
-  if (a && n) n.textContent = ago(a.atualizadoEm)
+  if (a && n) n.textContent = agoAtualizado(a.atualizadoEm)
 }
 
 function applyAgentes(body) {
@@ -666,9 +976,15 @@ function stopPolling() {
   AG.poll = null
 }
 
+/** A torre ao vivo só enquanto a aba Agentes está na tela: fora dela, uma conexão a menos. */
 function connectAgentes() {
   AG.source?.close()
+  AG.source = null
   stopPolling()
+  if (S.view !== 'agentes') {
+    AG.live = false
+    return
+  }
   AG.source = new EventSource('/api/torre/stream')
   AG.source.onopen = () => {
     AG.live = true
@@ -693,21 +1009,32 @@ function connectAgentes() {
   }
 }
 
-// O navegador abre no máximo 6 conexões por endereço, e cada aba do dashboard segura duas ao vivo
-// (jornada e torre). Com três abas abertas, a quarta ficava na fila e não carregava. Aba escondida
-// solta as duas e reconecta quando volta para a frente.
+function openAgent(a) {
+  if (a.tipo === 'ultron' && a.sessao) go(a.sessao)
+  else location.hash = `#/agente/${encodeURIComponent(a.id)}`
+}
+
+setInterval(renderAge, 1000)
+
+// ------------------------------------------------------------ aba escondida solta as conexões ao vivo
+
+// O navegador abre no máximo 6 conexões por endereço, e cada aba do dashboard segura até duas ao vivo
+// (sessões e jornada, ou sessões e torre). Com várias abas abertas, a seguinte ficava na fila e não
+// carregava. Aba escondida solta todas e reconecta quando volta para a frente.
 function pauseLive() {
   source?.close()
   source = null
+  liveSessions?.close()
+  liveSessions = null
   AG.source?.close()
   AG.source = null
   stopPolling()
 }
 
 function resumeLive() {
+  if (!liveSessions || liveSessions.readyState === EventSource.CLOSED) connectSessions()
   if (!source || source.readyState === EventSource.CLOSED) connect()
   if (!AG.source || AG.source.readyState === EventSource.CLOSED) connectAgentes()
-  loadRuns()
 }
 
 document.addEventListener('visibilitychange', () => (document.hidden ? pauseLive() : resumeLive()))
@@ -715,67 +1042,6 @@ addEventListener('pagehide', pauseLive)
 addEventListener('pageshow', e => {
   if (e.persisted && !document.hidden) resumeLive()
 })
-
-setInterval(renderAge, 1000)
-
-// ---- rota: `#agente=<id>` abre o perfil; sem hash, a jornada
-
-function routeId() {
-  const m = location.hash.match(/^#agente=(.+)$/)
-  if (!m) return null
-  try {
-    return decodeURIComponent(m[1])
-  } catch {
-    return null
-  }
-}
-
-/** Mostra o que a URL pede; idempotente. */
-function applyRoute() {
-  AG.sel = routeId()
-  const isProfile = AG.sel !== null
-  $('perfil').hidden = !isProfile
-  $('view-jornada').hidden = isProfile
-  if (isProfile) renderPerfil()
-  else {
-    S.walker = { left: null, movingUntil: 0 }
-    if (S.run) renderJourney(S.run)
-  }
-  renderAgentes()
-}
-
-/** Navega (com entrada no histórico): id abre o perfil, null abre a jornada, de `sid` se vier. */
-function goRoute(id, sid) {
-  if (sid && sid !== S.sid) {
-    S.sid = sid
-    S.run = null
-    S.walker = { left: null, movingUntil: 0 }
-    renderSessions()
-    connect()
-    render()
-  }
-  const url = `${location.pathname}${S.sid ? `?session=${encodeURIComponent(S.sid)}` : ''}${id === null ? '' : `#agente=${encodeURIComponent(id)}`}`
-  if (url !== `${location.pathname}${location.search}${location.hash}`) history.pushState(null, '', url)
-  applyRoute()
-}
-
-function openAgent(a) {
-  if (a.tipo === 'ultron' && a.sessao) goRoute(null, a.sessao)
-  else goRoute(a.id)
-}
-
-window.addEventListener('popstate', () => {
-  const sid = new URLSearchParams(location.search).get('session')
-  if (sid && sid !== S.sid) {
-    S.sid = sid
-    S.run = null
-    renderSessions()
-    connect()
-    render()
-  }
-  applyRoute()
-})
-window.addEventListener('hashchange', applyRoute)
 
 // ------------------------------------------------------------ actions
 
@@ -824,7 +1090,22 @@ $('add-form').onsubmit = async e => {
   }
 }
 
-$('session').onchange = e => goRoute(null, e.target.value || S.sid)
+$('start-form').onsubmit = async e => {
+  e.preventDefault()
+  const prompt = $('start-prompt').value.trim()
+  if (!prompt) return $('start-prompt').focus()
+  const isOpen = Boolean(sessionOf(S.sid)?.isAlive)
+  $('start-submit').disabled = true
+  const ok = await sendTask({ prompt, open: !isOpen })
+  $('start-submit').disabled = false
+  if (ok) $('start-prompt').value = ''
+}
+$('start-prompt').onkeydown = e => {
+  if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) $('start-form').requestSubmit()
+}
+$('start-pending-cancel').onclick = () => sendTask({ cancel: true })
+
+window.addEventListener('hashchange', route)
 
 window.addEventListener('resize', () => S.run && renderJourney(S.run))
 
@@ -838,13 +1119,18 @@ document.addEventListener('focusout', () => {
 
 function frame(now) {
   const run = S.run
-  draw($('logo'), 'idle', now)
-  if (!$('empty').hidden) draw($('empty-sprite'), 'wait', now)
-  if (run && !$('content').hidden) {
+  drawHead($('logo'), now)
+  draw($('rail-sprite'), S.sessions.some(s => isRunning(s) && s.run.running > 0) ? 'work' : 'idle', now)
+  drawAllHolos(now)
+  if (S.view === 'sessions' && !$('sessions-empty').hidden) draw($('empty-sessions-sprite'), 'idle', now)
+  if (S.view === 'flow' && !$('start').hidden) draw($('start-sprite'), 'wait', now)
+  if (S.view === 'flow' && !$('empty').hidden) draw($('empty-sprite'), 'wait', now)
+  if (S.view === 'flow' && run && !$('content').hidden) {
     const p = pose(run, now)
     draw($('ultron'), p, now)
     const say = sayFor(run, p)
     if ($('walker-say').textContent !== say) $('walker-say').textContent = say
+    $('walker').classList.toggle('triumph', p === 'win')
   }
   requestAnimationFrame(frame)
 }
@@ -854,13 +1140,17 @@ function frame(now) {
 async function start() {
   S.meta = await (await fetch('/api/meta')).json()
   $('add-role').replaceChildren(...Object.entries(S.meta.roles).map(([k, r]) => opt(k, r.label, 'builder')))
-  await loadRuns()
-  connect()
-  render()
-  applyRoute()
-  connectAgentes()
+  connectSessions()
+  route()
+  if (S.view !== 'agentes') pollAgentes() // só o número da aba Agentes
   if (document.hidden) pauseLive() // aberta em segundo plano: conecta só quando for vista
-  setInterval(() => document.hidden || loadRuns(), 10_000)
+  // Relative times ("há 5 min") age even when nothing changes.
+  setInterval(() => {
+    if (document.hidden) return
+    renderLists()
+    if (S.view === 'flow') renderSessionHead()
+    if (S.view !== 'agentes') pollAgentes()
+  }, 30_000)
   requestAnimationFrame(frame)
 }
 
