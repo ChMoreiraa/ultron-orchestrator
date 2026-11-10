@@ -1430,7 +1430,7 @@ a.brand {
 /* ------------------------------------------------------------ Ultron, larger and detailed */
 
 .brand canvas.logo-head {
-  width: 46px;
+  width: 48px;
   height: 32px;
 }
 
@@ -1694,7 +1694,7 @@ a.brand {
 /* ------------------------------------------------------------ Ultron 32×32 on a 40×40 canvas, whole-number scales */
 
 .brand canvas.logo-head {
-  width: 52px;
+  width: 51px;
   height: 36px;
 }
 

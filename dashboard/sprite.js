@@ -1,10 +1,9 @@
-// Ultron em pixel art (32×32), chibi: o mesmo personagem do painel do
-// terminal, em mais detalhe. Cabeça grande de cromo (domo com crista clara
-// até o nariz, aletas nas têmporas presas à mandíbula, olhos em fenda que
-// descem para o nariz, sorriso em U com dentes) sobre um corpo compacto de
-// armadura, com o núcleo vermelho no peito. Cada parte do corpo é pintada na
-// sua camada, sombreada com luz do alto à esquerda e carimbada com um traço
-// escuro onde cobre a parte de trás.
+// Ultron em pixel art (32×32), no visual dos quadrinhos: corpo humanoide de
+// armadura prateada e uma cabeça desenhada pixel a pixel (oval, crista
+// central que desce até o nariz, aletas nas têmporas presas à mandíbula,
+// olhos em fenda sob sobrancelhas inclinadas, sorriso em U com dentes).
+// Cada parte do corpo é pintada na sua camada, sombreada com luz do alto à
+// esquerda e carimbada com um traço escuro onde cobre a parte de trás.
 export const PALETTE = {
   K: '#0b0d11', // contorno
   D: '#2f343d', // aço profundo
@@ -143,78 +142,41 @@ function outline(g) {
   return out
 }
 
-// ---------------------------------------------------------------- the head
+// ---------------------------------------------------------------- the head, by hand
 
-// A chibi head, big on a compact body, the same Ultron as the terminal pane:
-// a chrome dome with a bright ridge down to the nose, fins at the temples
-// joined to the jaw, eyes in slits that slant down to the nose, a toothed
-// grin and a chin. Rows of the head start at HEAD_TOP.
+// 15 columns, centred on the ridge. Fins on columns 1 and 13, joined to the
+// jaw at the mouth line; the gap between fin and skull becomes outline.
+const HEAD = [
+  '.....LMHDN.....',
+  '....LLLHDNN....',
+  '.L.LLLMHDNNN.N.',
+  '.L.LDDMHMDDN.N.',
+  '.L.LRRDHDRRN.N.',
+  '.L.MLMDNDMNN.N.',
+  '.M.LRMMNMMRN.D.',
+  '.MMLRrrrrrRNDD.',
+  '....DRRRRRD....',
+  '.....LDLDL.....',
+  '......LMN......',
+]
 const HEAD_TOP = 1
-const HEAD_HALVES = [3, 5, 6, 7, 8, 8, 8, 8, 8, 8, 7, 6, 5, 3]
-/** The eye slits: [dx from the centre, row]; mirrored for the right eye. */
-const EYE_SLIT = [[-7, 7], [-6, 7], [-5, 7], [-5, 8], [-4, 8], [-3, 8]]
-const EYE_ROWS = [HEAD_TOP + 7, HEAD_TOP + 8]
+const EYES = [[4, 4], [5, 4], [9, 4], [10, 4]] // [column, row] in HEAD
 
 function head({ dead = false, blaze = false } = {}) {
   const p = blank()
-  rows(p, HEAD_TOP, HEAD_HALVES)
-  // Fins: a blade at each temple, rising above the skull, joined to the jaw.
-  for (let y = 2; y <= 8; y++) both(p, CX - 11, HEAD_TOP + y, 'M')
-  for (let y = 4; y <= 10; y++) both(p, CX - 10, HEAD_TOP + y, 'M')
-  both(p, CX - 9, HEAD_TOP + 10, 'M')
-  both(p, CX - 8, HEAD_TOP + 11, 'M')
-  shadeAcross(p, CX - 9, CX + 9)
-  for (let y = 2; y <= 10; y++) {
-    set(p, CX - 11, HEAD_TOP + y, y <= 8 ? 'H' : '.')
-    set(p, CX - 10, HEAD_TOP + y, y < 4 ? '.' : 'L')
-    set(p, mx(CX - 11), HEAD_TOP + y, y <= 8 ? 'N' : '.')
-    set(p, mx(CX - 10), HEAD_TOP + y, y < 4 ? '.' : 'D')
-  }
-  const at = (dx, y, c) => set(p, CX + dx, HEAD_TOP + y, c)
-  const pair = (dx, y, c, cr = c) => {
-    at(dx, y, c)
-    at(-dx, y, cr)
-  }
-  // The ridge: lit on the left, a shadow on the right, down to the nose.
-  for (let y = 0; y <= 6; y++) {
-    at(-1, y, 'L')
-    at(0, y, 'H')
-    at(1, y, 'N')
-  }
-  at(0, 7, 'L')
-  at(1, 7, 'N')
-  at(0, 8, 'M')
-  at(1, 8, 'D')
-  // Brow: a hard shadow over each eye, sloping down to the ridge.
-  for (const [dx, y] of [[-7, 6], [-6, 6], [-5, 6], [-4, 7], [-3, 7], [-2, 8]]) pair(dx, y, 'D')
-  // Sockets around the slits, then the slits themselves.
-  for (const [dx, y] of [[-7, 8], [-6, 8], [-2, 9], [-3, 9], [-4, 9]]) pair(dx, y, 'N', 'D')
-  for (const [dx, y] of EYE_SLIT) pair(dx, y, 'R')
-  pair(-6, 7, 'E')
-  // Cheek lines from the eyes down to the grin.
-  for (let y = 9; y <= 10; y++) pair(-7, y, 'N', 'D')
-  // The grin: a dark lip, glowing teeth with gaps, narrowing to the chin.
-  // The grin, a U: corners up at the cheeks, teeth across, the glow deepest at the bottom.
-  for (let dx = -4; dx <= 4; dx++) at(dx, 10, 'D')
-  pair(-5, 10, 'R')
-  for (let dx = -4; dx <= 4; dx++) at(dx, 11, dx % 2 ? 'r' : 'R')
-  pair(-5, 11, 'D')
-  for (let dx = -3; dx <= 3; dx++) at(dx, 12, Math.abs(dx) === 3 ? 'r' : 'R')
-  pair(-4, 12, 'D')
-  // Chin: a lit plate under the grin.
-  at(-1, 13, 'L')
-  at(0, 13, 'L')
+  const at = (x, y, c) => set(p, CX - 7 + x, HEAD_TOP + y, c)
+  HEAD.forEach((row, y) => {
+    for (let x = 0; x < row.length; x++) if (row[x] !== '.') at(x, y, row[x])
+  })
   if (dead) {
-    for (let y = 0; y < SIZE; y++)
-      for (let x = 0; x < SIZE; x++) {
-        const c = p[y][x]
-        if (c === 'R' || c === 'E') p[y][x] = EYE_ROWS.includes(y) ? 'G' : 'N'
-        else if (c === 'r') p[y][x] = 'D'
-      }
+    HEAD.forEach((row, y) => {
+      for (let x = 0; x < row.length; x++) if (row[x] === 'R' || row[x] === 'r') at(x, y, EYES.some(([ex, ey]) => ex === x && ey === y) ? 'G' : 'D')
+    })
   } else if (blaze) {
-    pair(-5, 7, 'Y')
-    pair(-4, 8, 'Y')
-    pair(-6, 7, 'H')
+    at(5, 4, 'Y')
+    at(9, 4, 'Y')
+    at(4, 4, 'E')
+    at(10, 4, 'E')
   }
   return p
 }
@@ -223,142 +185,135 @@ function head({ dead = false, blaze = false } = {}) {
 
 function neck() {
   const p = blank()
-  rows(p, 15, [2])
+  rows(p, 11, [2, 2, 2])
   shade(p)
-  set(p, CX - 1, 15, 'D')
-  set(p, CX + 1, 15, 'D')
+  for (const x of [CX - 1, CX + 1]) for (let y = 11; y <= 13; y++) set(p, x, y, 'D')
   return p
 }
 
-/** Chest, belly and belt: broad at the shoulders, a short waist. The core glows in the middle. */
-function torso({ dead = false } = {}) {
+/** Chest, abdomen, belt and hips: a broad chest tapering hard to a thin waist. */
+function torso() {
   const p = blank()
-  rows(p, 16, [6, 7, 7, 7, 6, 6, 5, 5, 4])
-  shadeAcross(p, CX - 7, CX + 7)
-  // Softer than the chrome head: the body keeps its brightest light for the plates.
-  for (let y = 16; y <= 24; y++) for (let x = 0; x < SIZE; x++) if (p[y][x] === 'H') p[y][x] = 'L'
-  // The chest plates: a lit upper edge, a hard line under each.
-  for (let x = CX - 6; x <= CX - 3; x++) both(p, x, 16, 'L')
-  for (let x = CX - 6; x <= CX - 3; x++) both(p, x, 20, 'D')
-  set(p, CX - 5, 17, 'H')
-  set(p, CX - 4, 17, 'H')
-  // The core: a red diamond with a hot centre, set in a dark ring.
-  const core = dead ? { R: 'G', E: 'N', r: 'D' } : { R: 'R', E: 'E', r: 'r' }
-  for (const [x, y, c] of [
-    [0, 17, 'D'],
-    [-1, 18, 'D'], [0, 18, 'R'], [1, 18, 'D'],
-    [-2, 19, 'D'], [-1, 19, 'R'], [0, 19, 'E'], [1, 19, 'R'], [2, 19, 'D'],
-    [-1, 20, 'D'], [0, 20, 'r'], [1, 20, 'D'],
-    [0, 21, 'D'],
-  ])
-    set(p, CX + x, y, core[c] ?? c)
-  // The belly: a line down the middle, lit blocks on the left.
-  set(p, CX, 22, 'D')
-  set(p, CX - 2, 22, 'H')
-  set(p, CX - 1, 22, 'L')
+  rows(p, 13, [6, 9, 10, 10, 10, 9, 8, 6, 5, 4, 4, 3])
+  shadeAcross(p, CX - 10, CX + 10)
+  // The plate on the upper chest.
+  for (let x = CX - 2; x <= CX + 2; x++) {
+    set(p, x, 15, 'D')
+    set(p, x, 17, 'D')
+    set(p, x, 16, x < CX ? 'L' : 'N')
+  }
+  both(p, CX - 3, 16, 'D')
+  set(p, CX - 2, 16, 'H')
+  // Collar, and the pecs: a lit upper edge, a hard line curving under each.
+  for (let x = CX - 6; x <= CX - 4; x++) both(p, x, 14, 'L')
+  for (let x = CX - 8; x <= CX - 5; x++) both(p, x, 18, 'D')
+  for (let x = CX - 4; x <= CX - 1; x++) both(p, x, 19, 'N')
+  for (let x = CX - 8; x <= CX - 5; x++) set(p, x, 17, 'H')
+  // The abs: a line down the middle, lit blocks on the left.
+  for (let y = 19; y <= 21; y++) set(p, CX, y, 'D')
+  set(p, CX - 2, 20, 'L')
+  set(p, CX - 1, 20, 'H')
+  set(p, CX - 1, 21, 'L')
   // Belt with its buckle.
-  for (let x = CX - 5; x <= CX + 5; x++) set(p, x, 23, 'D')
-  set(p, CX - 1, 23, 'L')
-  set(p, CX, 23, 'H')
-  set(p, CX + 1, 23, 'N')
+  for (let x = CX - 4; x <= CX + 4; x++) set(p, x, 22, 'D')
+  set(p, CX - 1, 22, 'L')
+  set(p, CX, 22, 'H')
+  set(p, CX + 1, 22, 'M')
+  // Hips: a V down the middle.
+  both(p, CX - 3, 23, 'D')
+  set(p, CX, 23, 'D')
   set(p, CX, 24, 'D')
   return p
 }
 
-/** Round shoulder plates with a ridge of light on top. */
+/** Angular deltoid plates with small spikes along the top. */
 function shoulders() {
   const p = blank()
+  const plate = [[13, -1, 2], [14, -2, 2], [15, -3, 2], [16, -3, 1], [17, -2, 1]] // [y, from, to] around the joint
   for (const s of [-1, 1]) {
-    const x = s < 0 ? CX - 8 : mx(CX - 8)
-    disc(p, x, 17, 2)
-    set(p, x, 14, 'M')
-    set(p, x - s, 14, 'M')
+    const x = c => (s < 0 ? c : mx(c))
+    const x0 = CX - 10
+    for (const [y, a, b] of plate) for (let k = a; k <= b; k++) set(p, x(x0 + k), y, 'M')
+    for (const sx of [CX - 11, CX - 8]) {
+      set(p, x(sx), 12, 'M')
+      set(p, x(sx), 11, 'M')
+    }
   }
   shade(p)
-  for (const s of [-1, 1]) {
-    const x = s < 0 ? CX - 8 : mx(CX - 8)
-    mark(p, x - 1, 15, 'H')
-    mark(p, x, 15, 'L')
-    for (let k = -2; k <= 2; k++) mark(p, x + k, 19, 'N')
-  }
+  for (const s of [-1, 1]) for (let k = -2; k <= 0; k++) mark(p, s < 0 ? CX - 10 + k : mx(CX - 10 + k), 16, 'N')
   return p
 }
 
 const ARMS = {
   // [shoulder, elbow, wrist] for the left arm (viewer's left); the right mirrors unless given.
-  rest: { left: [[CX - 9, 18], [CX - 10, 21], [CX - 10, 24]] },
-  swingA: { left: [[CX - 9, 18], [CX - 9, 21], [CX - 8, 24]], right: [[mx(CX - 9), 18], [mx(CX - 11), 21], [mx(CX - 12), 23]] },
-  swingB: { left: [[CX - 9, 18], [CX - 11, 21], [CX - 12, 23]], right: [[mx(CX - 9), 18], [mx(CX - 9), 21], [mx(CX - 8), 24]] },
-  claw: { left: [[CX - 9, 18], [CX - 10, 21], [CX - 10, 24]], right: [[mx(CX - 9), 18], [mx(CX - 12), 14], [mx(CX - 13), 9]] },
-  crossed: { left: [[CX - 9, 18], [CX - 9, 21], [CX + 4, 20]], right: [[mx(CX - 9), 18], [mx(CX - 9), 22], [CX - 4, 21]] },
-  stance: { left: [[CX - 9, 18], [CX - 11, 21], [CX - 12, 24]], right: [[mx(CX - 9), 17], [mx(CX - 12), 13], [mx(CX - 14), 8]] },
-  slump: { left: [[CX - 9, 18], [CX - 9, 22], [CX - 8, 26]] },
+  rest: { left: [[CX - 11, 16], [CX - 13, 20], [CX - 13, 24]] },
+  swingA: { left: [[CX - 11, 16], [CX - 11, 20], [CX - 10, 24]], right: [[mx(CX - 11), 16], [mx(CX - 13), 19], [mx(CX - 14), 23]] },
+  swingB: { left: [[CX - 11, 16], [CX - 13, 19], [CX - 14, 23]], right: [[mx(CX - 11), 16], [mx(CX - 11), 20], [mx(CX - 10), 24]] },
+  claw: { left: [[CX - 11, 16], [CX - 12, 20], [CX - 13, 24]], right: [[mx(CX - 11), 16], [mx(CX - 13), 11], [mx(CX - 13), 6]] },
+  crossed: { left: [[CX - 11, 16], [CX - 11, 20], [CX + 4, 19]], right: [[mx(CX - 11), 16], [mx(CX - 11), 21], [CX - 5, 20]] },
+  stance: { left: [[CX - 11, 16], [CX - 13, 20], [CX - 14, 24]], right: [[mx(CX - 11), 15], [mx(CX - 13), 12], [mx(CX - 14), 7]] },
+  slump: { left: [[CX - 11, 16], [CX - 11, 21], [CX - 10, 26]] },
 }
 
-/** A claw at the wrist: palm, three talons fanned, a thumb. */
-function claw(p, [ex, ey], [wx, wy], { isOpen = true, thumb = 1 } = {}) {
+/** An open hand at the wrist: palm, three fingers fanned, a thumb. */
+function hand(p, [ex, ey], [wx, wy], { isOpen = true, thumb = 1 } = {}) {
   const len = Math.hypot(wx - ex, wy - ey) || 1
   const ux = (wx - ex) / len
   const uy = (wy - ey) / len
   const cx = wx + ux
   const cy = wy + uy
   disc(p, Math.round(cx), Math.round(cy), 1)
-  const fan = isOpen ? [-0.75, 0, 0.75] : [-0.25, 0.25]
-  const reach = isOpen ? 3 : 2
+  const fan = isOpen ? [-0.7, 0, 0.7] : [-0.3, 0, 0.3]
+  const reach = isOpen ? 3.2 : 2.2
   for (const a of fan) {
     const fx = ux * Math.cos(a) - uy * Math.sin(a)
     const fy = ux * Math.sin(a) + uy * Math.cos(a)
     limb(p, Math.round(cx + fx * 1.5), Math.round(cy + fy * 1.5), Math.round(cx + fx * reach), Math.round(cy + fy * reach), 0)
   }
-  if (isOpen) {
-    const ta = 1.5 * thumb
-    const tx = ux * Math.cos(ta) - uy * Math.sin(ta)
-    const ty = ux * Math.sin(ta) + uy * Math.cos(ta)
-    limb(p, Math.round(cx + tx * 1.5), Math.round(cy + ty * 1.5), Math.round(cx + tx * 2.2), Math.round(cy + ty * 2.2), 0)
-  }
+  const ta = 1.5 * thumb
+  const tx = ux * Math.cos(ta) - uy * Math.sin(ta)
+  const ty = ux * Math.sin(ta) + uy * Math.cos(ta)
+  limb(p, Math.round(cx + tx * 1.5), Math.round(cy + ty * 1.5), Math.round(cx + tx * 2.5), Math.round(cy + ty * 2.5), 0)
 }
 
-/** One arm on its own layer: upper arm, armoured forearm with a cuff, a fist or a claw. */
-function arm([a, e, w], { side, raised = false, isOpen = true }) {
+/** One arm on its own layer: bulky upper arm, armoured forearm, the hand. */
+function arm([a, e, w], { side, isOpen = true, fist = false }) {
   const p = blank()
+  // Upper arm with a bulging biceps, a lean forearm.
   limb(p, a[0], a[1], e[0], e[1], 1)
+  disc(p, Math.round(a[0] + (e[0] - a[0]) * 0.45), Math.round(a[1] + (e[1] - a[1]) * 0.45), 2)
   limb(p, e[0], e[1], w[0], w[1], 1)
-  if (raised) claw(p, e, w, { isOpen, thumb: side })
-  else {
-    // A round fist just past the wrist.
-    const len = Math.hypot(w[0] - e[0], w[1] - e[1]) || 1
-    disc(p, Math.round(w[0] + (w[0] - e[0]) / len), Math.round(w[1] + (w[1] - e[1]) / len), 1)
-  }
+  if (fist) disc(p, w[0], w[1], 1)
+  else hand(p, e, w, { isOpen, thumb: side })
   shade(p)
   const len = Math.hypot(w[0] - e[0], w[1] - e[1]) || 1
   const ux = (w[0] - e[0]) / len
   const uy = (w[1] - e[1]) / len
-  seam(p, e[0], e[1], ux, uy, 1)
-  seam(p, Math.round(w[0] - ux), Math.round(w[1] - uy), ux, uy, 1, 'N')
+  seam(p, e[0] + ux, e[1] + uy, ux, uy, 1)
   return p
 }
 
 const LEGS = {
   // [hip, knee, ankle] for each leg, left then right.
-  stand: [[[CX - 3, 25], [CX - 3, 27], [CX - 4, 29]], [[mx(CX - 3), 25], [mx(CX - 3), 27], [mx(CX - 4), 29]]],
-  strideA: [[[CX - 3, 25], [CX - 5, 27], [CX - 7, 29]], [[mx(CX - 3), 25], [mx(CX - 3), 27], [mx(CX - 2), 29]]],
-  strideB: [[[CX - 3, 25], [CX - 3, 27], [CX - 2, 29]], [[mx(CX - 3), 25], [mx(CX - 5), 27], [mx(CX - 7), 29]]],
-  tap: [[[CX - 3, 25], [CX - 3, 27], [CX - 4, 29]], [[mx(CX - 3), 25], [mx(CX - 5), 27], [mx(CX - 6), 28]]],
-  stance: [[[CX - 4, 25], [CX - 6, 27], [CX - 8, 29]], [[mx(CX - 4), 25], [mx(CX - 6), 27], [mx(CX - 8), 29]]],
+  stand: [[[CX - 3, 23], [CX - 4, 26], [CX - 5, 29]], [[mx(CX - 3), 23], [mx(CX - 4), 26], [mx(CX - 5), 29]]],
+  strideA: [[[CX - 3, 23], [CX - 6, 26], [CX - 8, 29]], [[mx(CX - 3), 23], [mx(CX - 3), 26], [mx(CX - 3), 29]]],
+  strideB: [[[CX - 3, 23], [CX - 3, 26], [CX - 3, 29]], [[mx(CX - 3), 23], [mx(CX - 6), 26], [mx(CX - 8), 29]]],
+  tap: [[[CX - 3, 23], [CX - 4, 26], [CX - 5, 29]], [[mx(CX - 3), 23], [mx(CX - 5), 26], [mx(CX - 7), 28]]],
+  stance: [[[CX - 4, 23], [CX - 7, 26], [CX - 10, 29]], [[mx(CX - 4), 23], [mx(CX - 7), 26], [mx(CX - 10), 29]]],
 }
 
-/** One short leg: thigh, a lit knee, the shin and a boot pointing outwards. */
+/** One leg: armoured thigh, knee plate, shin and boot. */
 function leg([hip, knee, ankle]) {
   const p = blank()
-  limb(p, hip[0], hip[1], knee[0], knee[1], 1)
+  limb(p, hip[0], hip[1], knee[0], knee[1], 2)
   limb(p, knee[0], knee[1], ankle[0], ankle[1], 1)
   const toe = ankle[0] < CX ? -1 : 1
   for (let x = ankle[0] - 2; x <= ankle[0] + 2; x++) set(p, x, ankle[1] + 1, 'M')
   set(p, ankle[0] + 3 * toe, ankle[1] + 1, 'M')
   shade(p)
   set(p, knee[0], knee[1], 'H')
-  for (let x = ankle[0] - 2; x <= ankle[0] + 2; x++) mark(p, x, ankle[1] + 1, 'N')
-  mark(p, ankle[0] - 1, ankle[1] + 1, 'L')
+  set(p, knee[0] + 1, knee[1], 'L')
+  for (let x = ankle[0] - 1; x <= ankle[0] + 1; x++) mark(p, x, ankle[1], 'D')
   return p
 }
 
@@ -367,19 +322,19 @@ function leg([hip, knee, ankle]) {
 function compose({ armKind = 'rest', legKind = 'stand', dead = false, blaze = false, isOpen = true } = {}) {
   const g = blank()
   for (const l of LEGS[legKind]) stamp(g, leg(l))
-  stamp(g, torso({ dead }))
+  stamp(g, torso())
   stamp(g, neck())
   const spec = ARMS[armKind]
   const right = spec.right ?? spec.left.map(([x, y]) => [mx(x), y])
-  const raised = armKind === 'claw' || armKind === 'stance'
-  if (armKind === 'crossed') {
-    // Folded across the chest, in front of everything but the head.
+  const fist = armKind === 'crossed'
+  // Arms hang behind the shoulder plates, except when folded across the chest.
+  if (fist) {
     stamp(g, shoulders())
-    stamp(g, arm(right, { side: 1 }))
-    stamp(g, arm(spec.left, { side: -1 }))
+    stamp(g, arm(right, { side: 1, fist }))
+    stamp(g, arm(spec.left, { side: -1, fist }))
   } else {
     stamp(g, arm(spec.left, { side: -1 }))
-    stamp(g, arm(right, { side: 1, raised, isOpen: armKind === 'claw' ? isOpen : true }))
+    stamp(g, arm(right, { side: 1, isOpen: armKind === 'claw' ? isOpen : true }))
     stamp(g, shoulders())
   }
   stamp(g, head({ dead, blaze }))
@@ -401,6 +356,8 @@ const FRAMES = {
 
 /** For tools that preview the art: the palette and every frame. */
 export const ART = { palette: PALETTE, frames: FRAMES }
+
+const EYE_ROWS = [HEAD_TOP + 4]
 
 /** The frame's 32 rows for a pose and time. */
 export function frame(pose, t) {
@@ -426,7 +383,7 @@ export function frame(pose, t) {
       rows = FRAMES.idle
   }
   // A blink now and then.
-  if (pose !== 'fail' && pose !== 'win' && Math.floor(t / 3000) % 4 === 3 && t % 3000 < 150) rows = rows.map((r, y) => (EYE_ROWS.includes(y) ? r.replace(/[RE]/g, 'D') : r))
+  if (pose !== 'fail' && pose !== 'win' && Math.floor(t / 3000) % 4 === 3 && t % 3000 < 150) rows = rows.map((r, y) => (EYE_ROWS.includes(y) ? r.replace(/R/g, 'D') : r))
   return rows
 }
 
@@ -451,17 +408,17 @@ export function draw(canvas, pose, t) {
   if (pose !== 'fail') {
     const strong = pose === 'win'
     const ex = dx + CX + 0.5
-    const ey = dy + HEAD_TOP + 8
-    const glow = ctx.createRadialGradient(ex, ey, 1, ex, ey, strong ? 12 : 9)
-    glow.addColorStop(0, `rgba(255,43,31,${(strong ? 0.42 : 0.26) + 0.12 * Math.sin(t / 300)})`)
+    const ey = dy + HEAD_TOP + 5
+    const glow = ctx.createRadialGradient(ex, ey, 1, ex, ey, strong ? 10 : 7)
+    glow.addColorStop(0, `rgba(255,43,31,${(strong ? 0.42 : 0.28) + 0.12 * Math.sin(t / 300)})`)
     glow.addColorStop(1, 'rgba(255,43,31,0)')
     ctx.fillStyle = glow
-    ctx.fillRect(ex - 13, ey - 13, 26, 26)
+    ctx.fillRect(ex - 11, ey - 11, 22, 22)
   }
   paint(ctx, frame(pose, t), dx, dy)
 
   if (pose === 'work') {
-    const sparks = [[36, 4], [38, 8], [33, 2], [37, 6], [35, 10]]
+    const sparks = [[34, 3], [36, 7], [31, 1], [35, 5], [33, 9]]
     const [sx, sy] = sparks[tick % sparks.length]
     dot(ctx, sx, sy, PALETTE.S)
     dot(ctx, sx + 1, sy, PALETTE.R)
@@ -471,7 +428,7 @@ export function draw(canvas, pose, t) {
   }
   if (pose === 'win') {
     // Energy crackling around the raised claw, dust at the feet.
-    const points = [[38, 6], [35, 2], [39, 11], [32, 4], [1, 33], [38, 36], [2, 38]]
+    const points = [[37, 5], [34, 1], [38, 10], [31, 3], [1, 33], [38, 36], [2, 38]]
     points.forEach(([x, y], k) => {
       if ((tick + k) % 3) dot(ctx, x, y, tick % 2 ? PALETTE.R : PALETTE.S)
     })
@@ -479,18 +436,18 @@ export function draw(canvas, pose, t) {
   if (pose === 'fail') {
     const puff = tick % 6
     ctx.fillStyle = 'rgba(154,160,170,0.75)'
-    ctx.fillRect(26 - puff, 3 - (puff >> 1), 3, 2)
-    ctx.fillRect(29 - puff, 1 - (puff >> 2), 2, 1)
+    ctx.fillRect(24 - puff, 3 - (puff >> 1), 3, 2)
+    ctx.fillRect(27 - puff, 1 - (puff >> 2), 2, 1)
   }
   if (pose === 'wait') {
     // A "?" over his head.
     ctx.fillStyle = PALETTE.H
-    ctx.fillRect(32, 0, 7, 8)
+    ctx.fillRect(31, 0, 7, 8)
     ctx.fillStyle = PALETTE.K
-    ctx.fillRect(34, 1, 3, 1)
-    ctx.fillRect(36, 2, 1, 2)
-    ctx.fillRect(35, 4, 1, 1)
-    ctx.fillRect(35, 6, 1, 1)
+    ctx.fillRect(33, 1, 3, 1)
+    ctx.fillRect(35, 2, 1, 2)
+    ctx.fillRect(34, 4, 1, 1)
+    ctx.fillRect(34, 6, 1, 1)
   }
 }
 
@@ -509,23 +466,15 @@ function dot(ctx, x, y, c) {
 }
 
 /** The head and fins alone, for the logo: Ultron as the main icon. */
-const LOGO_W = 23
-const LOGO_H = 16
-
 export function drawHead(canvas, t) {
   const ctx = canvas.getContext('2d')
-  if (canvas.width !== LOGO_W) {
-    canvas.width = LOGO_W
-    canvas.height = LOGO_H
+  if (canvas.width !== 17) {
+    canvas.width = 17
+    canvas.height = 12
   }
-  ctx.clearRect(0, 0, LOGO_W, LOGO_H)
-  // Only the head's own layer, outlined, so neither neck nor shoulders creep in.
-  const g = blank()
-  stamp(g, head())
-  const rows = outline(g)
-    .map(r => r.join(''))
-    .slice(0, LOGO_H)
-    .map(r => r.slice(CX - 11, CX + 12))
-  const blink = Math.floor(t / 3000) % 4 === 3 && t % 3000 < 150
-  paint(ctx, blink ? rows.map((r, y) => (EYE_ROWS.includes(y) ? r.replace(/[RE]/g, 'D') : r)) : rows, 0, 0)
+  ctx.clearRect(0, 0, 17, 12)
+  const rows = frame('idle', t)
+    .slice(0, 12)
+    .map(r => r.slice(CX - 8, CX + 9))
+  paint(ctx, rows, 0, 0)
 }

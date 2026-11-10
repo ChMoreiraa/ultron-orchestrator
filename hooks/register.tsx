@@ -4,7 +4,7 @@ import type { EngineInterface, Register } from 'claude-code'
 import { AGENT_REPO, TAG, agentBlock, agentSlug, applyInbox, apply, currentIndex, gate, inboxLines, isApproved, isTerminal, newRun, progress, statusText } from '../core/run-core'
 import type { Command, Identity, Model, Run, Step } from '../types'
 import { lineFor, momentOf } from '../core/quotes'
-import { cells, spark } from './sprite'
+import { SPRITE_W, cells, spark } from './sprite'
 import type { Pose } from './sprite'
 
 const PANE = 'ultron'
@@ -160,8 +160,6 @@ async function activate($: EngineInterface) {
 }
 
 const dashboardUrl = (sessionId: string) => `http://127.0.0.1:${port}/?session=${encodeURIComponent(sessionId)}`
-
-const SPRITE_W = 16
 
 /** Where the sprite should stand on a trail `width` columns wide. */
 function targetColumn(run: Run, width: number): number {
