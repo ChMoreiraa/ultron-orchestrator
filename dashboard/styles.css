@@ -2227,3 +2227,59 @@ a.brand {
     animation: none;
   }
 }
+
+/* ------------------------------------------------------------ sessions outside a repository: amber, easy to spot */
+
+.no-repo-badge {
+  display: inline-block;
+  vertical-align: middle;
+  padding: 3px 6px;
+  border-radius: 4px;
+  font-family: var(--pixel);
+  font-size: 8px;
+  font-weight: 400;
+  letter-spacing: 0.04em;
+  line-height: 1.2;
+  color: #1a1300;
+  background: var(--warn);
+  box-shadow: 0 0 10px color-mix(in srgb, var(--warn) 45%, transparent);
+  white-space: nowrap;
+}
+
+.repo-group.no-repo {
+  border: 2px dashed var(--warn);
+  background: repeating-linear-gradient(135deg, color-mix(in srgb, var(--warn) 6%, transparent) 0 12px, transparent 12px 24px);
+}
+
+/* The group's header stays in sight while its cards scroll by. */
+.repo-group.no-repo .repo-head {
+  position: sticky;
+  top: 70px;
+  z-index: 3;
+  margin: -6px -8px 0;
+  padding: 8px;
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--bg) 92%, var(--warn));
+  box-shadow: 0 6px 14px rgba(0, 0, 0, 0.25);
+}
+
+.repo-group.no-repo .no-repo-title {
+  display: inline-block;
+  padding: 6px 10px;
+  border-radius: 6px;
+  font-family: var(--pixel);
+  font-size: 13px;
+  letter-spacing: 0.04em;
+  color: #1a1300;
+  background: var(--warn);
+  text-shadow: none;
+  box-shadow: 0 0 14px color-mix(in srgb, var(--warn) 50%, transparent);
+}
+
+.scard.no-repo {
+  box-shadow: inset 4px 0 0 var(--warn);
+}
+
+.scard-sub .no-repo-badge {
+  margin-right: 4px;
+}

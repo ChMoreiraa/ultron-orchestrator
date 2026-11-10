@@ -115,7 +115,8 @@ export type Command = { id?: string; at?: number; by?: string } & (
 export type Applied = { ok: boolean; error?: string; notify?: string }
 
 /** The repo a session runs in and the Marvel AI it goes by while open. */
-export type Identity = { name: string; color: string; repo: string }
+/** The AI the dashboard gave this session: of its repo, or of its folder when `noRepo` (then `repo` is the folder's name). */
+export type Identity = { name: string; color: string; repo: string; noRepo?: boolean }
 
 declare module 'claude-code' {
   interface PluginState {

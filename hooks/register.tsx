@@ -24,6 +24,8 @@ const lastTaskAtom = atom({ plugin: 'ultron', key: 'lastTaskId' } as const, '')
 /** This session's repo and the Marvel AI the dashboard named it after; null outside a repo. */
 const identityAtom = atom({ plugin: 'ultron', key: 'identity' } as const, null, { shape: 'identity-1' })
 const NO_REPO_COLOR = '#8a93a6'
+/** The badge that marks a session outside any repository: amber, to stand out. */
+const NO_REPO_BADGE = '#f5b942'
 
 const TIER_COLOR: Record<Model, string> = { haiku: '#5fd0c5', sonnet: '#8f9bff', opus: '#d58cff' }
 const RED = '#e1263b'
@@ -247,13 +249,19 @@ async function gitInfo($: EngineInterface, cwd: string): Promise<{ branch: strin
   return { branch: head && head !== 'HEAD' ? head : null, repo: { key: name.toLowerCase(), name, root: slash(root) } }
 }
 
-/** The AI name and colour the dashboard gave this session's repo, for the pane. */
+/** The names.json key of a folder outside any repository (as bin/lib/names.mjs computes it). */
+const folderKey = (cwd: string) => `pasta:${cwd.replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase()}`
+
+/** The AI name and colour the dashboard gave this session's repo, or its folder outside one, for the pane. */
 async function readIdentity($: EngineInterface) {
   if (!presence) return
   const repo = presence.info.repo
-  const names = repo && (await $.fs.exists(presence.names)) ? await readJson<{ repos?: Record<string, { name: string; color: string }> }>($, presence.names, {}) : {}
-  const ai = repo ? names.repos?.[repo.key] : undefined
-  const next: Identity | null = repo ? { name: ai?.name ?? '', color: ai?.color ?? NO_REPO_COLOR, repo: repo.name } : null
+  const cwd = presence.info.cwd
+  const key = repo ? repo.key : folderKey(cwd)
+  const names = (await $.fs.exists(presence.names)) ? await readJson<{ repos?: Record<string, { name: string; color: string }> }>($, presence.names, {}) : {}
+  const ai = names.repos?.[key]
+  const folder = cwd.replace(/\/+$/, '').split('/').filter(Boolean).pop() ?? cwd
+  const next: Identity = repo ? { name: ai?.name ?? '', color: ai?.color ?? NO_REPO_COLOR, repo: repo.name } : { name: ai?.name ?? '', color: ai?.color ?? NO_REPO_COLOR, repo: folder, noRepo: true }
   const held = await read($, identityAtom)
   if (JSON.stringify(held) !== JSON.stringify(next)) await update($, identityAtom, () => next)
 }
@@ -535,7 +543,17 @@ export const register: Register = on => {
 
     return (
       <Box flexDirection="column" paddingX={1}>
-        {identity ? (
+        {identity?.noRepo ? (
+          <Text wrap="truncate">
+            <Text color={identity.color} bold>
+              ◉ {identity.name || '…'}
+            </Text>{' '}
+            <Text color="#1a1300" backgroundColor={NO_REPO_BADGE} bold>
+              {' sem repositório '}
+            </Text>
+            <Text dimColor> {trunc(identity.repo, width - (identity.name.length || 1) - 22)}</Text>
+          </Text>
+        ) : identity ? (
           <Text wrap="truncate">
             <Text color={identity.color} bold>
               ◉ {identity.name || '…'}

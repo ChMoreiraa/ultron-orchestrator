@@ -259,7 +259,7 @@ function sessionCard(s, kind) {
   return el(
     'article',
     {
-      class: `scard ${isCompact ? 'compact' : kind} ${s.isAlive ? 'alive' : 'closed'} ${s.ai ? 'has-ai' : 'no-ai'} ${run ? `run-${run.status}` : 'no-run'} ${s.sessionId === S.sid && S.view === 'flow' ? 'selected' : ''}`,
+      class: `scard ${isCompact ? 'compact' : kind} ${s.isAlive ? 'alive' : 'closed'} ${s.ai ? 'has-ai' : 'no-ai'}${s.noRepo ? ' no-repo' : ''} ${run ? `run-${run.status}` : 'no-run'} ${s.sessionId === S.sid && S.view === 'flow' ? 'selected' : ''}`,
       style: `--ai:${s.ai ? s.ai.color : NEUTRAL}`,
       tabindex: '0',
       role: 'link',
@@ -275,7 +275,7 @@ function sessionCard(s, kind) {
         'div',
         { class: 'scard-names' },
         el('h3', { class: 'scard-title', title: headline }, headline),
-        s.ai ? el('div', { class: 'scard-sub', title }, title) : null,
+        s.noRepo ? el('div', { class: 'scard-sub', title }, noRepoBadge(), ' ', title) : s.ai ? el('div', { class: 'scard-sub', title }, title) : null,
       ),
       el('span', { class: 'dot', title: s.isAlive ? 'sessão aberta' : 'sessão encerrada' }),
     ),
@@ -284,7 +284,7 @@ function sessionCard(s, kind) {
       : el(
           'dl',
           { class: 'scard-info' },
-          info('Repositório', s.repo?.name, { class: 'mono' }),
+          s.repo ? info('Repositório', s.repo.name, { class: 'mono' }) : null,
           info('Branch', s.branch ? el('span', { class: 'chip branch' }, '⎇ ', s.branch) : null),
           info('Pasta', shortPath(s.cwd), { class: 'mono', title: s.cwd ?? '' }),
         ),
@@ -293,7 +293,10 @@ function sessionCard(s, kind) {
   )
 }
 
-/** Open sessions grouped by repository, each group under its AI's name and colour; repo-less ones last. */
+/** The amber badge that marks a session outside any repository, easy to spot while scrolling. */
+const noRepoBadge = () => el('span', { class: 'no-repo-badge', title: 'Sessão fora de um repositório git' }, 'sem repositório')
+
+/** Open sessions grouped by repository, each group under its AI's name and colour; repo-less ones last, each with its folder's AI. */
 function repoGroups(active) {
   const groups = new Map()
   for (const s of active) {
@@ -308,7 +311,7 @@ function repoGroups(active) {
     const running = list.filter(isRunning).length
     return el(
       'section',
-      { class: `repo-group ${ai ? 'has-ai' : 'no-ai'}`, style: `--ai:${ai ? ai.color : NEUTRAL}` },
+      { class: `repo-group ${ai ? 'has-ai' : 'no-ai'}${key ? '' : ' no-repo'}`, style: `--ai:${ai ? ai.color : NEUTRAL}` },
       el(
         'header',
         { class: 'repo-head' },
@@ -316,8 +319,8 @@ function repoGroups(active) {
         el(
           'div',
           { class: 'repo-names' },
-          el('h2', { class: 'repo-ai' }, ai ? ai.name : 'Sem repositório'),
-          el('div', { class: 'repo-name mono' }, key ? lead.repo.name : 'sessões fora de um repositório git'),
+          key ? el('h2', { class: 'repo-ai' }, ai ? ai.name : lead.repo.name) : el('h2', { class: 'repo-ai no-repo-title' }, 'Sem repositório'),
+          el('div', { class: 'repo-name mono' }, key ? lead.repo.name : 'sessões fora de um repositório git · cada pasta com a sua IA'),
         ),
         el('div', { class: 'repo-count' }, el('strong', {}, String(list.length)), list.length === 1 ? ' sessão' : ' sessões', running ? el('span', { class: 'muted' }, ` · ${running} com fluxo`) : null),
       ),
@@ -362,6 +365,7 @@ function renderSessionHead() {
   $('session-title').textContent = title
   const meta = []
   if (s?.repo) meta.push(el('span', { class: 'chip mono' }, s.repo.name))
+  else if (s?.noRepo) meta.push(noRepoBadge())
   if (s?.branch) meta.push(el('span', { class: 'chip branch' }, '⎇ ', s.branch))
   if (s?.cwd) meta.push(el('span', { class: 'mono muted small', title: s.cwd }, shortPath(s.cwd)))
   meta.push(

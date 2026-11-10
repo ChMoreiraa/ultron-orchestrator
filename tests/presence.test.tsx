@@ -129,12 +129,14 @@ test('the pane shows the Marvel AI the dashboard gave the session’s repo, in i
   await ui.unmount()
 })
 
-test('a session outside a repository has no AI name', async ($, on) => {
-  const { files } = world(on, {}, { noRepo: true })
+test('a session outside a repository shows the AI of its folder and a "sem repositório" badge', async ($, on) => {
+  const { files } = world(on, { [NAMES]: JSON.stringify({ repos: { 'pasta:c:/tmp': { name: 'Karen', color: '#b48cff', since: 1 } }, last: {} }) }, { noRepo: true })
   await $.session.start({ cwd: 'C:/tmp', surface: 'terminal', isInteractive: true })
   expect(JSON.parse(files[INFO]!).repo).toBe(null)
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
-  expect(await ui.find({ type: 'Text', text: /sessão sem repositório/ })).toBeTruthy()
+  expect(await ui.find({ type: 'Text', text: /◉ Karen/ })).toBeTruthy()
+  expect(await ui.find({ type: 'Text', text: /sem repositório/ })).toBeTruthy()
+  expect(await ui.find({ type: 'Text', text: /tmp/ })).toBeTruthy()
   await ui.unmount()
 })
 

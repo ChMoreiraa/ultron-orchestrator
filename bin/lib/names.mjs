@@ -1,8 +1,10 @@
 // A Marvel AI's name and hologram colour for each repository with an open
-// session. The name holds while the repo has a session open; when its last
-// session closes the name goes back to the pool, and next time the repo gets
-// another one (never the one it just had). Written only by the dashboard
-// server, in names.json; the mod reads it to show the name in its pane.
+// session, and for each folder outside a repository that has one (keyed
+// `pasta:<folder>`, from the same pool, so no two share a name). The name
+// holds while a session is open there; when the last one closes the name goes
+// back to the pool, and next time it gets another one (never the one it just
+// had). Written only by the dashboard server, in names.json; the mod reads it
+// to show the name in its pane.
 import { join } from 'node:path'
 
 import { HOME, readJson, writeJsonAtomic } from './store.mjs'
@@ -20,8 +22,11 @@ export const AIS = [
   { name: 'Dum-E', color: '#9fb3c8' },
 ]
 
-/** An open session outside any repository: no AI name, this colour. */
+/** A closed session, or one with no folder: no AI name, this colour. */
 export const NO_REPO_COLOR = '#8a93a6'
+
+/** The names.json key of a folder outside any repository (the mod computes the same). */
+export const folderKey = cwd => `pasta:${String(cwd).replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase()}`
 
 const ROMAN = ['', ' II', ' III', ' IV', ' V', ' VI', ' VII', ' VIII', ' IX', ' X']
 
@@ -73,28 +78,35 @@ export function assign(openRepoKeys, { file = NAMES_FILE, random = Math.random }
 }
 
 /**
- * Adds `repo` and `ai` to each session card: open sessions in a repo carry
- * its AI (with a number when the repo has several open), the rest none.
+ * Adds `repo`, `noRepo` and `ai` to each session card: an open session carries
+ * the AI of its repo, or of its folder when it runs outside one (numbered when
+ * several are open there); a closed one carries none.
  */
 export function nameSessions(cards, readInfo, options) {
-  const withRepo = cards.map(c => ({ card: c, repo: repoOf(readInfo(c.sessionId)) }))
-  const openKeys = [...new Set(withRepo.filter(x => x.card.isAlive && x.repo).map(x => x.repo.key))]
+  const withKey = cards.map(c => {
+    const info = readInfo(c.sessionId)
+    const repo = repoOf(info)
+    const cwd = info?.cwd ?? c.cwd
+    return { card: c, repo, key: repo ? repo.key : cwd ? folderKey(cwd) : null }
+  })
+  const openKeys = [...new Set(withKey.filter(x => x.card.isAlive && x.key).map(x => x.key))]
   const repos = assign(openKeys, options)
-  const byRepo = new Map()
-  for (const x of withRepo) {
-    if (!x.card.isAlive || !x.repo) continue
-    const list = byRepo.get(x.repo.key) ?? []
+  const byKey = new Map()
+  for (const x of withKey) {
+    if (!x.card.isAlive || !x.key) continue
+    const list = byKey.get(x.key) ?? []
     list.push(x.card)
-    byRepo.set(x.repo.key, list)
+    byKey.set(x.key, list)
   }
-  for (const list of byRepo.values()) list.sort((a, b) => (a.startedAt ?? 0) - (b.startedAt ?? 0))
-  return withRepo.map(({ card, repo }) => {
-    const a = repo && card.isAlive ? repos[repo.key] : null
-    const siblings = repo ? byRepo.get(repo.key) ?? [] : []
+  for (const list of byKey.values()) list.sort((a, b) => (a.startedAt ?? 0) - (b.startedAt ?? 0))
+  return withKey.map(({ card, repo, key }) => {
+    const a = key && card.isAlive ? repos[key] : null
+    const siblings = key ? byKey.get(key) ?? [] : []
     const index = siblings.indexOf(card) + 1
     return {
       ...card,
       repo,
+      noRepo: !repo,
       ai: a ? { name: a.name, color: a.color, index, count: siblings.length, label: siblings.length > 1 ? `${a.name} · ${index}` : a.name } : null,
       color: a ? a.color : NO_REPO_COLOR,
     }
